@@ -1,0 +1,55 @@
+name: Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Sieve Referee's core engine has zero external dependencies by design,
+      # so there is no `pip install -r requirements.txt` step here on purpose.
+      - name: Install package
+        run: pip install .
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: CLI smoke test
+        run: python3 -m sieve_referee.cli ./testdocs --json
+
+  benchmark:
+    name: Benchmark (smoke test)
+    runs-on: ubuntu-latest
+    # Runs on a single Python version only, as a separate job from the test
+    # matrix above. benchmark.py isn't an assertion-based test, so running it
+    # on every matrix version would burn CI minutes without adding coverage
+    # beyond "does it still run".
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run benchmark.py
+        run: python3 scripts/benchmark.py testdocs

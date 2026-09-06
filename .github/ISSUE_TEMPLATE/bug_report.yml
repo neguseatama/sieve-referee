@@ -1,0 +1,44 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in Sieve Referee
+title: "[BUG]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report!
+        Please include as much detail as possible so we can resolve the issue quickly.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the problem you're seeing.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce / minimal reproducible example
+      description: |
+        Please provide the minimal Python code or data set needed to reproduce the issue.
+      placeholder: |
+        ```python
+        # your reproduction code here
+        ```
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen instead (e.g. expected mask, expected LUT signal)?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, etc.
+      placeholder: "Python 3.10.4 / Ubuntu 22.04"
+    validations:
+      required: false

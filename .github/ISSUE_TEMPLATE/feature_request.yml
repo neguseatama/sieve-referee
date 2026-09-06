@@ -1,0 +1,32 @@
+name: Feature Request
+description: Propose a new feature or improvement for Sieve Referee
+title: "[FEAT]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a new feature!
+        Proposals that align with the project's design principles (deterministic,
+        zero-dependency, auditable) are especially welcome.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / background
+      description: What problem or use case does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the feature or algorithm you'd like to see implemented.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other approaches you considered.
+    validations:
+      required: false
