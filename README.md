@@ -74,8 +74,8 @@ from sieve_referee import batch_evaluate, EvaluationResult
 
 # 1. Prepare input documents in memory
 documents = {
-    "report_a.txt": "The results of this study are as follows. Key data is presented.",
-    "report_b.txt": "The findings of this research are as follows. Primary data is shown."
+    "doc_a.txt": "Quantum computing relies on superposition and entanglement to achieve fast factorization.",
+    "doc_b.txt": "To achieve fast factorization, quantum computing makes use of entanglement and superposition."
 }
 
 # 2. Run the screening
@@ -85,8 +85,8 @@ results: list[EvaluationResult] = batch_evaluate(documents)
 for res in results:
     print(f"Pair:    {res.item_id} <-> {res.matched_peer_id}")
     print(f"Signal:  {res.evaluation_signal.value}")  # -> RED
-    print(f"Mask:    {res.mask}")                      # -> 1010
-    print(f"Pattern: {res.pattern_name}")               # -> PARAPHRASE_DETECTED
+    print(f"Mask:    {res.mask}")                      # -> 0010
+    print(f"Pattern: {res.pattern_name}")               # -> UNFORMATTED_CONTENT_COPY
     print(f"Reason:  {res.reason}")
     print("-" * 40)
 ```
@@ -148,6 +148,36 @@ Four independent hypotheses (`H1`–`H4`) are combined into a 4-bit mask, which 
 
 > **Note on `H4` (cluster membership) and indirect chains**
 > `H4` is only set when a pair has *both* direct similarity evidence (`H2` or `H3`) *and* cluster membership of size ≥ 3. A pair with no direct evidence is never upgraded through cluster membership alone — such "telephone game" chains are reported separately as an indirect-chain warning on the dashboard, and the direct pair's own result is left unmodified.
+
+---
+
+## ⚠️ Known Limitation: Threshold Calibration Is Japanese-Specific
+
+All four thresholds (`H1 = 0.35`, `H2 = 0.80`, `H3 = 0.45`, cluster size `≥ 3`)
+were calibrated using real-data testing on **Japanese** text (roughly 1,300+
+pairs across unrelated documents, paraphrase pairs, and formal academic
+prose).
+
+The `H1` density metric in particular (`len(set(text)) / len(text)`) behaves
+very differently across scripts: Japanese text draws from a large set of
+kanji, so unique-character ratios tend to be high, while English and other
+alphabetic-script text reuses a small ~26-letter alphabet and will
+systematically score lower on this metric, independent of how generic or
+templated the content actually is. As a result, non-Japanese text may be
+under- or over-classified against the current defaults.
+
+Multi-encoding file reading (UTF-8, Shift_JIS, CP932, EUC-JP) and NFKC
+normalization work for any text regardless of language. What has **not**
+been separately validated is the semantic quality of `H2`/`H3` splitting,
+or the appropriateness of the default thresholds, for languages other than
+Japanese. If you use this on non-Japanese corpora, re-run the false-positive
+check described in [ARCHITECTURE.md](docs/ARCHITECTURE.md) against your own
+data before trusting the default thresholds.
+
+Additionally, the `reason` string returned by every `EvaluationResult` is
+currently hard-coded in Japanese regardless of the input document's
+language, as shown in the example output above. There is no English (or
+other-language) localization of these messages yet.
 
 ---
 
