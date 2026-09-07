@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sieve-referee"
-version = "1.0.0"
+version = "1.0.1"
 description = "Deterministic, zero-dependency plagiarism and text structure screening engine (Sieve-Core plugin)"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Kai IWASAKI" }]
-dependencies = []
+dependencies = [
+    "sieve-core-engine>=1.0.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/neguseatama/sieve-referee"
