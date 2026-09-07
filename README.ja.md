@@ -5,9 +5,9 @@
 > **「確率的AIモデルが生成したテキストを、別の確率的AIモデルで評価して本当に良いのだろうか？」**
 > 完全ローカル実行・外部依存ゼロ・決定論的（100%再現可能）なテキスト構造・盗用スクリーニングエンジンです。[Sieve-Core](https://github.com/neguseatama/sieve-core) の拡張応用事例として開発しました。
 
-[![PyPI Version](https://img.shields.io/pypi/v/sieve-scope.svg)](https://pypi.org/project/sieve-scope/)
-[![Python Version](https://img.shields.io/pypi/pyversions/sieve-scope.svg)](https://pypi.org/project/sieve-scope/)
-[![CI](https://github.com/neguseatama/sieve-scope/actions/workflows/test.yml/badge.svg)](https://github.com/neguseatama/sieve-scope/actions/workflows/test.yml)
+[![PyPI Version](https://img.shields.io/pypi/v/sieve-referee.svg)](https://pypi.org/project/sieve-referee/)
+[![Python Version](https://img.shields.io/pypi/pyversions/sieve-referee.svg)](https://pypi.org/project/sieve-referee/)
+[![CI](https://github.com/neguseatama/sieve-referee/actions/workflows/test.yml/badge.svg)](https://github.com/neguseatama/sieve-referee/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 ---
