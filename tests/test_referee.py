@@ -20,8 +20,6 @@ class TestLUTRules(unittest.TestCase):
                 self.assertEqual(signal_str, expected_signal)
                 self.assertEqual(pattern_name, expected_pattern)
 
-    def test_lut_has_12_reachable_states(self):
-        self.assertEqual(len(LUT_RULES), 12)
 
 
 class TestEvaluatorBatch(unittest.TestCase):
@@ -58,3 +56,61 @@ class TestEvaluatorBatch(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+_HIRA = ("あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほ"
+         "まみむめもやゆよらりるれろわをんのことにはをいろはにほへと"
+         "ちりぬるを")
+
+
+class TestPromotedMasksHaveDedicatedEntries(unittest.TestCase):
+    """D144 (case A): promoted masks 0011/0101/0111 must be classified by
+    their own dedicated LUT entries (CLUSTER_ naming, promotion-source
+    signal). Fixtures are measured to produce exactly these masks:
+    hiragana repetition drives h1 below 0.35 (b1=0); skeleton/keyword
+    design sets b2/b3."""
+
+    def test_lut_has_15_classified_states(self):
+        self.assertEqual(len(LUT_RULES), 15)
+
+    def _assert_dedicated(self, docs, target_mask, source_signal):
+        results = batch_evaluate(docs)
+        self.assertEqual(len(results), 3)
+        for res in results:
+            self.assertEqual(
+                res.mask, target_mask,
+                "pair %s-%s" % (res.item_id, res.matched_peer_id))
+            self.assertIn(res.mask, LUT_RULES)
+            self.assertIn("CLUSTER_", res.pattern_name)
+            sig = (res.evaluation_signal.value
+                   if hasattr(res.evaluation_signal, "value")
+                   else str(res.evaluation_signal))
+            entry = LUT_RULES[res.mask]
+            entry_sig = (entry[0].value if hasattr(entry[0], "value")
+                         else str(entry[0]))
+            self.assertEqual(sig, entry_sig)
+            self.assertEqual(entry_sig, source_signal)
+
+    def test_0011_promotion_gets_dedicated_red_entry(self):
+        docs = {
+            "docA.txt": _HIRA * 3 + "経費精算システム" + _HIRA[:20] + "を点検した。",
+            "docB.txt": _HIRA[:30] + "経費精算システム" + _HIRA * 3 + "を確認した。",
+            "docC.txt": _HIRA * 3 + "経費精算システム" + _HIRA[:25] + "を修正した。",
+        }
+        self._assert_dedicated(docs, "0011", "RED")
+
+    def test_0101_promotion_gets_dedicated_yellow_entry(self):
+        docs = {
+            "docA.txt": _HIRA * 3 + "経理部" + _HIRA[:15] + "人事課" + _HIRA[:10] + "営業部",
+            "docB.txt": _HIRA * 3 + "財務課" + _HIRA[:15] + "監査室" + _HIRA[:10] + "法務課",
+            "docC.txt": _HIRA * 3 + "経理課" + _HIRA[:15] + "人事室" + _HIRA[:10] + "営業課",
+        }
+        self._assert_dedicated(docs, "0101", "YELLOW")
+
+    def test_0111_promotion_gets_dedicated_red_entry(self):
+        docs = {
+            "docA.txt": _HIRA * 3 + "経理部" + _HIRA[:15] + "財務課" + _HIRA[:10],
+            "docB.txt": _HIRA * 3 + "経理部" + _HIRA[:15] + "財務課" + _HIRA[:10],
+            "docC.txt": _HIRA * 3 + "経理部" + _HIRA[:15] + "財務課" + _HIRA[:10],
+        }
+        self._assert_dedicated(docs, "0111", "RED")

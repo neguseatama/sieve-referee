@@ -17,6 +17,12 @@ LUT_RULES: Dict[str, tuple] = {
     "1101": (SignalColor.YELLOW, "CLUSTER_FORMAT_SHARING", "複数人で共通テンプレートを使い回しているクラスタです。"),
     "1011": (SignalColor.RED, "CLUSTER_PARAPHRASE_GROUP", "複数人による集団的な言い換え・単語置換グループが検出されました。"),
     "1001": (SignalColor.GREEN, "CLUSTER_DENSE_UNIQUE", "特定グループ内での標準的な記述です。"),
+    "0111": (SignalColor.RED, "CLUSTER_FORMATTED_PARAPHRASE",
+             "特殊構造内での内容流用が、複数人クラスタで繰り返されています。"),
+    "0101": (SignalColor.YELLOW, "CLUSTER_FORMAT_ONLY_MATCH",
+             "複数人で共通テンプレートを使うクラスタ内での定型構造一致です(内容は独自)。"),
+    "0011": (SignalColor.RED, "CLUSTER_UNFORMATTED_CONTENT_COPY",
+             "構造化されていないテキスト間での本文コピーが、複数人クラスタで繰り返されています。"),
 }
 
 
