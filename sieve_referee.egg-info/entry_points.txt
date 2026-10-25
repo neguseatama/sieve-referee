@@ -1,0 +1,2 @@
+[console_scripts]
+sieve-referee = sieve_referee.cli:main
