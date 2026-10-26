@@ -1,4 +1,4 @@
-# Sieve Referee
+# Sieve Referee v1.3.0
 
 English | [日本語](README.ja.md)
 
