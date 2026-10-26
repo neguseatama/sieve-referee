@@ -24,11 +24,13 @@ from pathlib import Path
 from sieve_referee.cli import main as cli_main
 from sieve_referee.quantifier_audit import (
     AUDIT_LUT,
+    DEFAULT_MODIFIER_VOCAB,
     DEFAULT_VOCAB,
     TagFileError,
     audit_documents,
     classify_scope_hint,
     enumerate_candidates,
+    find_modifier_patterns,
     load_tags_from_text,
     load_tags_file,
     load_vocab_file,
@@ -421,6 +423,183 @@ class TestZeroDependencyStaticScan(unittest.TestCase):
             elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
                 found.add(node.module.split(".")[0])
         self.assertEqual(found - allowed, set(), "non-stdlib import detected: %s" % (found - allowed))
+
+
+# ---------------------------------------------------------------------------
+# 案 1: 認識的確信度マーカー注記レーン(v1.3.0 追加・ユーザー提案 2026-10-26)
+# 設計境界(本テスト群が機械固定する):
+#   - 注記(メタフラグ)のみで判定を変えない(8 状態 LUT・tagfile 意味論は無変更)
+#   - 既定マーカー語彙 v1 は 10 パターン・sha256 pin・既定全称語彙と素集合
+#   - マーカーのみの文は候補にならない(共起は全称候補への注記としてだけ存在する)
+# ---------------------------------------------------------------------------
+
+EXPECTED_MODIFIER_VOCAB_SHA256 = "88439481bebc05635aa16887e6dc23651b05cf915104bb712775d9b3466d47c8"
+
+MARKER_HIT = "確実にすべての素数は奇数である。"
+
+
+class TestCertaintyMarkerVocab(unittest.TestCase):
+    def test_default_modifier_vocab_is_10_patterns(self):
+        self.assertEqual(len(DEFAULT_MODIFIER_VOCAB), 10)
+
+    def test_modifier_vocab_sha256_pin(self):
+        canonical = "\n".join(DEFAULT_MODIFIER_VOCAB)
+        self.assertEqual(
+            hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+            EXPECTED_MODIFIER_VOCAB_SHA256,
+        )
+
+    def test_modifier_vocab_is_disjoint_from_default_vocab(self):
+        """自己触発の禁止: 同 1 語が両語彙に立つと全称単独で共起扱いになるため素集合を pin。"""
+        self.assertEqual(set(DEFAULT_MODIFIER_VOCAB) & set(DEFAULT_VOCAB), set())
+
+    def test_no_modifier_contains_a_universal_pattern(self):
+        """マーカー語が全称語彙を部分文字列として含まないこと(意外な自己触発の防止)。"""
+        for mod in DEFAULT_MODIFIER_VOCAB:
+            for uni in DEFAULT_VOCAB:
+                self.assertNotIn(uni, mod, "modifier %r contains universal %r" % (mod, uni))
+
+
+class TestCertaintyAnnotation(unittest.TestCase):
+    def test_cooccurrence_is_annotated(self):
+        report = audit_documents({"doc.txt": MARKER_HIT})
+        cand = report.receipt["documents"][0]["candidates"][0]
+        self.assertEqual(cand["certainty_markers"], ["確実に"])
+        self.assertEqual(cand["patterns"], ["すべて"])
+
+    def test_universal_only_sentence_has_empty_markers(self):
+        report = audit_documents({"doc.txt": F6_ORIGINAL})
+        cand = report.receipt["documents"][0]["candidates"][0]
+        self.assertEqual(cand["certainty_markers"], [])
+        self.assertEqual(cand["patterns"], ["永遠に"])
+
+    def test_modifier_only_sentence_is_not_candidate(self):
+        """強意語だけの文は全称候補にならない(注記は全称候補への付帯情報)。"""
+        report = audit_documents({"doc.txt": "これは確実に動く。"})
+        self.assertEqual(report.receipt["documents"][0]["candidates"], [])
+
+    def test_markers_reported_in_declaration_order_dedup(self):
+        """文内の出現順ではなく語彙宣言順(決定論)。重複は 1 回。"""
+        text = "明白に、確実に、確実にすべての A は B。"
+        cand = audit_documents({"doc.txt": text}).receipt["documents"][0]["candidates"][0]
+        self.assertEqual(cand["certainty_markers"], ["確実に", "明白に"])
+
+    def test_custom_modifier_vocab_replaces_default(self):
+        report = audit_documents(
+            {"doc.txt": "確実に、断じてすべての A は B。"},
+            modifier_vocab=("断じて",),
+        )
+        cand = report.receipt["documents"][0]["candidates"][0]
+        self.assertEqual(cand["certainty_markers"], ["断じて"])
+
+    def test_empty_modifier_vocab_disables_annotation(self):
+        report = audit_documents({"doc.txt": MARKER_HIT}, modifier_vocab=())
+        cand = report.receipt["documents"][0]["candidates"][0]
+        self.assertEqual(cand["certainty_markers"], [])
+        self.assertEqual(report.receipt["certainty_flagged"], 0)
+        self.assertEqual(report.receipt["modifier_vocab_count"], 0)
+
+    def test_overlap_word_self_triggers(self):
+        """機構の pin: 語彙が全称語彙と重なっていても動作する(重複語は単独で共起を成立させる)。"""
+        report = audit_documents({"doc.txt": "常に A。"}, modifier_vocab=("常に",))
+        cand = report.receipt["documents"][0]["candidates"][0]
+        self.assertEqual(cand["patterns"], ["常に"])
+        self.assertEqual(cand["certainty_markers"], ["常に"])
+
+    def test_annotation_does_not_alter_signal(self):
+        """最大の設計境界: 注記は GREEN/YELLOW/RED を一切変えない(tag のみが判定を決める)。"""
+        sha = hashlib.sha256(MARKER_HIT.strip().encode("utf-8")).hexdigest()
+        untagged = audit_documents({"doc.txt": MARKER_HIT})
+        tagged = audit_documents({"doc.txt": MARKER_HIT}, tags={sha: "theorem"})
+        self.assertEqual(
+            (untagged.receipt["documents"][0]["candidates"][0]["signal"],
+             untagged.receipt["documents"][0]["candidates"][0]["pattern_name"]),
+            ("RED", "UNBACKED_UNIVERSAL"),
+        )
+        self.assertEqual(
+            (tagged.receipt["documents"][0]["candidates"][0]["signal"],
+             tagged.receipt["documents"][0]["candidates"][0]["pattern_name"]),
+            ("GREEN", "THEOREM_BACKED_UNIVERSAL"),
+        )
+
+    def test_receipt_records_modifier_vocab_sha256_and_count(self):
+        receipt = audit_documents({"doc.txt": MARKER_HIT}).receipt
+        self.assertEqual(receipt["modifier_vocab_count"], 10)
+        self.assertEqual(receipt["modifier_vocab_sha256"], EXPECTED_MODIFIER_VOCAB_SHA256)
+
+    def test_receipt_certainty_flagged_totals(self):
+        sha = hashlib.sha256(F6_ORIGINAL.strip().encode("utf-8")).hexdigest()
+        docs = {"doc.txt": MARKER_HIT + F6_ORIGINAL}
+        report = audit_documents(docs, tags={sha: "theorem"})
+        self.assertEqual(report.receipt["documents"][0]["certainty_flagged"], 1)
+        self.assertEqual(report.receipt["certainty_flagged"], 1)
+
+    def test_public_receipt_carries_markers_but_no_body(self):
+        """Redact 慣行の継続: 注記語(語彙語)は載せるが本文は載せない。"""
+        receipt_json = json.dumps(audit_documents({"doc.txt": MARKER_HIT}).receipt, ensure_ascii=False)
+        self.assertIn("確実に", receipt_json)
+        self.assertNotIn("素数は", receipt_json)
+
+    def test_find_modifier_patterns_direct(self):
+        self.assertEqual(find_modifier_patterns("確実に明白に A。", DEFAULT_MODIFIER_VOCAB),
+                         ["確実に", "明白に"])
+        self.assertEqual(find_modifier_patterns("無関係な文。", DEFAULT_MODIFIER_VOCAB), [])
+
+
+class TestCLICertainty(unittest.TestCase):
+    def _write_doc(self, td, name, text):
+        p = Path(td) / name
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def _run_cli(self, argv):
+        out = io.StringIO()
+        code = None
+        old_argv = sys.argv
+        sys.argv = ["sieve-referee"] + argv
+        try:
+            with redirect_stdout(out):
+                cli_main()
+        except SystemExit as e:
+            code = e.code
+        finally:
+            sys.argv = old_argv
+        return code, out.getvalue()
+
+    def _parse_json_prefix(self, out):
+        payload, _ = json.JSONDecoder().raw_decode(out.strip())
+        return payload
+
+    def test_modifier_vocab_flag_annotates_worksheet(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._write_doc(td, "draft.txt", MARKER_HIT)
+            modfile = self._write_doc(td, "mods.txt", "# 確信度マーカー\n確実に\n")
+            code, out = self._run_cli(
+                [td, "--audit", "--audit-modifier-vocab", str(modfile), "--output-dir", td]
+            )
+            self.assertEqual(code, 0)
+            self.assertIn("modifiers: 1 patterns", out)
+            self.assertIn("certainty=確実に", out)
+
+    def test_missing_modifier_vocab_file_exit_2(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._write_doc(td, "draft.txt", MARKER_HIT)
+            code, out = self._run_cli(
+                [td, "--audit-modifier-vocab", str(Path(td) / "nope.txt"), "--output-dir", td]
+            )
+            self.assertEqual(code, 2)
+
+    def test_flag_alone_enables_audit_lane(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._write_doc(td, "draft.txt", MARKER_HIT)
+            modfile = self._write_doc(td, "mods.txt", "確実に\n")
+            code, out = self._run_cli(
+                [td, "--audit-modifier-vocab", str(modfile), "--json", "--output-dir", td]
+            )
+            self.assertEqual(code, 0)
+            payload = self._parse_json_prefix(out)
+            self.assertIsInstance(payload, dict)
+            self.assertEqual(payload["audit"]["certainty_flagged"], 1)
 
 
 if __name__ == "__main__":

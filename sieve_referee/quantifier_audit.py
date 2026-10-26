@@ -9,6 +9,11 @@
     - 検証者がやること: 各候補への裏づけタグ(backing)とスコープ形(scope)の指定。
       タグの真偽(本当に定理か・本当に全列挙か)は検証者が責任を持つ。
 
+確信度マーカー注記レーン(案 1・ユーザー提案 2026-10-26):
+    全称候補と強意語(確実に/紛れもなく等)の同一文内共起を検出し、
+    certainty_markers として候補に注記する。注記は判定を変えない —
+    GREEN/YELLOW/RED の意味論は (backing, scope) のみで決まる(8 状態 LUT 無変更)。
+
 仮説の構造(ペア判定 H1-H4 とは別軸の単一文書監査):
     A1 全称性   : 候補文であること(語彙照合で決定論的に確定・機械)
     A2 裏づけ   : backing = theorem | enumerated | sample | unbacked(検証者)
@@ -38,6 +43,19 @@ DEFAULT_VOCAB: Tuple[str, ...] = (
     "決して", "けっして", "任意の", "どの", "いかなる",
     "一度も", "一回も", "どこにも", "どちらも", "どれも",
     "永遠に", "絶対に",
+)
+
+# ---------------------------------------------------------------------------
+# 確信度マーカー語彙 v1(sha256 pin: 88439481bebc05635aa16887e6dc23651b05cf915104bb712775d9b3466d47c8)
+# 案 1(認識的確信度マーカー)用の第 2 語彙。強意・断定モダリティの標識のみを集める。
+# - 既定全称語彙(DEFAULT_VOCAB)と素集合(自己触発の禁止 — テストで機械固定)
+# - 語彙側の機構は重なりを許す(重複語は単独で共起を成立させる — テストで pin)
+# - 重み(階級)は導入しない: 共起の有無の 2 値のみ。階級化は語彙の将来拡張に譲る
+# - recall 重視(過剰注記 = Human が 1 文数秒で処分・取りこぼし = 注記機能の無意味化)
+# ---------------------------------------------------------------------------
+DEFAULT_MODIFIER_VOCAB: Tuple[str, ...] = (
+    "確実に", "紛れもなく", "明白に", "明らかに", "断じて",
+    "間違いなく", "疑いなく", "自明に", "例外なく", "一切",
 )
 
 VALID_BACKINGS = ("theorem", "enumerated", "sample")
@@ -157,6 +175,21 @@ def enumerate_candidates(text: str, vocab: Tuple[str, ...]) -> List[Dict]:
     return candidates
 
 
+def find_modifier_patterns(sentence_text: str,
+                           modifier_vocab: Tuple[str, ...]) -> List[str]:
+    """文内に出現する確信度マーカー(強意語)を語彙宣言順・重複なしで返す。
+
+    - 判定は部分文字列照合のみ(決定論的)。否定・スコープ・真偽の解釈はしない
+      (「エンジンは推測しない」の継承 — 共起は事実、解釈は Human の確認対象)。
+    - 語彙が全称語彙と重なっていても処理可能(重複語は単独で共起を成立させる)。
+    """
+    found: List[str] = []
+    for pattern in modifier_vocab:
+        if pattern and pattern in sentence_text and pattern not in found:
+            found.append(pattern)
+    return found
+
+
 def classify_scope_hint(sentence_text: str) -> str:
     """scope_hint(情報提供のみ・判定はしない)。
 
@@ -257,6 +290,7 @@ class QuantifierAuditReport:
 def audit_documents(documents: Dict[str, str],
                     vocab: Optional[Tuple[str, ...]] = None,
                     tags: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
+                    modifier_vocab: Optional[Tuple[str, ...]] = None,
                     ) -> QuantifierAuditReport:
     """文書辞書(item_id -> text)を監査レーンに通す。
 
@@ -264,15 +298,21 @@ def audit_documents(documents: Dict[str, str],
       の文字列。オフセットはその文字列に対する 0 始まりの文字位置。
     - 戻り値の receipt は本文を含まない(位置・ハッシュのみ)。
     - worksheets は item_id ごとに本文つき候補を返す(Human のタグ作業用)。
+    - modifier_vocab は確信度マーカー語彙(None 時は既定語彙・空 tuple で機能無効)。
+      共起した候補には certainty_markers(語彙宣言順・重複なし)を注記する。
+      注記は判定を変えない(LUT・タグ意味論は無変更)。
     """
     patterns = DEFAULT_VOCAB if vocab is None else tuple(vocab)
     tag_map = {} if tags is None else tags
     vocab_sha = hashlib.sha256("\n".join(patterns).encode("utf-8")).hexdigest()
+    mod_patterns = DEFAULT_MODIFIER_VOCAB if modifier_vocab is None else tuple(modifier_vocab)
+    modifier_vocab_sha = hashlib.sha256("\n".join(mod_patterns).encode("utf-8")).hexdigest()
 
     doc_receipts: List[Dict] = []
     worksheets: Dict[str, List[Dict]] = {}
     tag_totals = {"theorem": 0, "enumerated": 0, "sample": 0, "unbacked": 0}
     total_unverified = 0
+    total_certainty_flagged = 0
     used_keys = set()
 
     for item_id in sorted(documents.keys()):
@@ -280,6 +320,7 @@ def audit_documents(documents: Dict[str, str],
         cands = enumerate_candidates(text, patterns)
         for cand in cands:
             cand["scope_hint"] = classify_scope_hint(cand["sentence_text"])
+            cand["certainty_markers"] = find_modifier_patterns(cand["sentence_text"], mod_patterns)
             key = cand["sentence_sha256"]
             tag = tag_map.get(key)
             if tag is not None:
@@ -303,6 +344,8 @@ def audit_documents(documents: Dict[str, str],
             signal_counts[cand["signal"]] += 1
         doc_unverified = signal_counts["RED"]
         total_unverified += doc_unverified
+        doc_certainty_flagged = sum(1 for c in cands if c["certainty_markers"])
+        total_certainty_flagged += doc_certainty_flagged
 
         doc_receipts.append({
             "item_id": item_id,
@@ -311,6 +354,7 @@ def audit_documents(documents: Dict[str, str],
             "candidates": [_public_candidate(c) for c in cands],
             "signal_counts": signal_counts,
             "unverified_remaining": doc_unverified,
+            "certainty_flagged": doc_certainty_flagged,
         })
         worksheets[item_id] = cands
 
@@ -318,9 +362,12 @@ def audit_documents(documents: Dict[str, str],
     receipt = {
         "vocab_sha256": vocab_sha,
         "vocab_count": len(patterns),
+        "modifier_vocab_sha256": modifier_vocab_sha,
+        "modifier_vocab_count": len(mod_patterns),
         "documents": doc_receipts,
         "tag_counts": tag_totals,
         "unverified_remaining": total_unverified,
+        "certainty_flagged": total_certainty_flagged,
         "unused_tags": unused_tags,
     }
     return QuantifierAuditReport(receipt=receipt, worksheets=worksheets)
@@ -335,6 +382,7 @@ def _public_candidate(cand: Dict) -> Dict:
         "patterns": cand["patterns"],
         "sentence_sha256": cand["sentence_sha256"],
         "scope_hint": cand["scope_hint"],
+        "certainty_markers": cand["certainty_markers"],
         "backing": cand["backing"],
         "scope": cand["scope"],
         "signal": cand["signal"],
@@ -376,13 +424,16 @@ def format_audit_report(report: QuantifierAuditReport) -> str:
     lines: List[str] = []
     lines.append("=== Quantifier Audit (量化子監査) ===")
     lines.append("vocab: %d patterns, sha256: %s" % (receipt["vocab_count"], receipt["vocab_sha256"]))
+    lines.append("modifiers: %d patterns, sha256: %s" % (
+        receipt["modifier_vocab_count"], receipt["modifier_vocab_sha256"]))
     total_candidates = sum(d["signal_counts"]["GREEN"] + d["signal_counts"]["YELLOW"] + d["signal_counts"]["RED"]
                            for d in receipt["documents"])
-    lines.append("documents: %d, candidates: %d, GREEN: %d, YELLOW: %d, RED: %d" % (
+    lines.append("documents: %d, candidates: %d, GREEN: %d, YELLOW: %d, RED: %d, certainty-flagged: %d" % (
         len(receipt["documents"]), total_candidates,
         sum(d["signal_counts"]["GREEN"] for d in receipt["documents"]),
         sum(d["signal_counts"]["YELLOW"] for d in receipt["documents"]),
         sum(d["signal_counts"]["RED"] for d in receipt["documents"]),
+        receipt["certainty_flagged"],
     ))
     lines.append("UNVERIFIED REMAINING: %d" % receipt["unverified_remaining"])
     for doc in receipt["documents"]:
@@ -392,11 +443,13 @@ def format_audit_report(report: QuantifierAuditReport) -> str:
         if not ws:
             lines.append("  (no quantifier candidates)")
         for cand, full in zip(doc["candidates"], ws):
-            lines.append(
-                "  [%d] pos %d-%d patterns=%s hint=%s scope=%s backing=%s -> %s %s" % (
-                    cand["seq"], cand["start"], cand["end"],
-                    "|".join(cand["patterns"]), cand["scope_hint"], cand["scope"],
-                    cand["backing"], cand["signal"], cand["pattern_name"]))
+            base = "  [%d] pos %d-%d patterns=%s hint=%s scope=%s backing=%s -> %s %s" % (
+                cand["seq"], cand["start"], cand["end"],
+                "|".join(cand["patterns"]), cand["scope_hint"], cand["scope"],
+                cand["backing"], cand["signal"], cand["pattern_name"])
+            if cand["certainty_markers"]:
+                base += " certainty=%s" % "|".join(cand["certainty_markers"])
+            lines.append(base)
             lines.append("      text: %s" % full["sentence_text"])
             lines.append("      sha256: %s" % cand["sentence_sha256"])
             if cand["evidence"]:

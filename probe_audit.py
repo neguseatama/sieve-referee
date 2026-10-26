@@ -10,6 +10,8 @@
   P4 本文非掲載  : Machine Receipt(JSON)に本文が現れない(ハッシュのみ)
   P5 ゲート      : RED 残留で --fail-on-unverified → 終了コード 1 / タグ適用で 0
   P6 実事故文    : フェルマー記事 F6 の修正前(RED)/修正後+定理タグ(GREEN)の区分
+  P7 確信度注記  : 案 1 — 強意語との共起が certainty_markers として注記され、
+                  判定(signal)は一切変わらないこと。強意語単独文は候補にならない
 """
 import hashlib
 import json
@@ -21,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from sieve_referee import DEFAULT_VOCAB, audit_documents, load_tags_from_text
+from sieve_referee import DEFAULT_MODIFIER_VOCAB, DEFAULT_VOCAB, audit_documents, load_tags_from_text
 from sieve_referee.quantifier_audit import format_audit_report
 
 F6_ORIGINAL = "排除は一撃で確定し、肯定は永遠に非確定だ。"
@@ -121,6 +123,26 @@ rep_fixed = audit_documents({"f6.txt": F6_FIXED}, tags={sha_fixed: "theorem"})
 cand_fixed = rep_fixed.receipt["documents"][0]["candidates"][0]
 check("P6 fixed+theorem is GREEN/THEOREM_BACKED_UNIVERSAL",
       (cand_fixed["signal"], cand_fixed["pattern_name"]) == ("GREEN", "THEOREM_BACKED_UNIVERSAL"))
+
+# --- P7 確信度マーカー注記(案 1・v1.3.0) ----------------------------------------
+marked = audit_documents({"m.txt": "確実にすべての素数は奇数である。"})
+mcand = marked.receipt["documents"][0]["candidates"][0]
+check("P7 co-occurrence annotated (signal unchanged)",
+      mcand["certainty_markers"] == ["確実に"] and mcand["signal"] == "RED",
+      "markers=%s signal=%s" % (mcand["certainty_markers"], mcand["signal"]))
+
+plain = audit_documents({"m.txt": F6_ORIGINAL})
+pcand = plain.receipt["documents"][0]["candidates"][0]
+check("P7 plain universal stays clean",
+      pcand["certainty_markers"] == [] and pcand["pattern_name"] == "UNBACKED_UNIVERSAL")
+
+solo = audit_documents({"m.txt": "これは確実に動く。"})
+check("P7 modifier-only sentence is not a candidate",
+      len(solo.receipt["documents"][0]["candidates"]) == 0)
+check("P7 default modifier vocab pin",
+      len(DEFAULT_MODIFIER_VOCAB) == 10
+      and hashlib.sha256("\n".join(DEFAULT_MODIFIER_VOCAB).encode("utf-8")).hexdigest()
+      == "88439481bebc05635aa16887e6dc23651b05cf915104bb712775d9b3466d47c8")
 
 # --- Human worksheet の見本(先頭 12 行) ----------------------------------------
 print("\n--- worksheet sample (draft_a.txt, untagged) ---")

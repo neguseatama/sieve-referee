@@ -44,13 +44,16 @@ def main():
                         help="量化子監査レーン(全称命題の裏づけ監査)を実行する")
     parser.add_argument("--audit-vocab", type=str, default=None,
                         help="量化子語彙ファイル(1 行 1 パターン・# コメント)。未指定時は既定語彙 v1")
+    parser.add_argument("--audit-modifier-vocab", type=str, default=None,
+                        help="確信度マーカー語彙ファイル(案 1 注記レーン・1 行 1 パターン)。未指定時は既定語彙 v1")
     parser.add_argument("--audit-tags", type=str, default=None,
                         help="裏づけタグファイル(JSON: sentence_sha256 -> backing/scope)")
     parser.add_argument("--fail-on-unverified", action="store_true",
                         help="監査 RED(裏づけのない全称文)が 1 件でもあれば終了コード 1")
     args = parser.parse_args()
 
-    audit_enabled = args.audit or args.audit_vocab or args.audit_tags or args.fail_on_unverified
+    audit_enabled = (args.audit or args.audit_vocab or args.audit_tags
+                     or args.audit_modifier_vocab or args.fail_on_unverified)
 
     target_path = Path(args.target_dir)
     if not target_path.exists() or not target_path.is_dir():
@@ -77,10 +80,11 @@ def main():
         try:
             vocab = load_vocab_file(args.audit_vocab) if args.audit_vocab else None
             tags = load_tags_file(args.audit_tags) if args.audit_tags else None
+            modifiers = load_vocab_file(args.audit_modifier_vocab) if args.audit_modifier_vocab else None
         except (TagFileError, FileNotFoundError) as e:
             print("Error: %s" % e, file=sys.stderr)
             sys.exit(2)
-        audit_report = audit_documents(doc_dict, vocab=vocab, tags=tags)
+        audit_report = audit_documents(doc_dict, vocab=vocab, tags=tags, modifier_vocab=modifiers)
 
     if args.json:
         if audit_enabled:
