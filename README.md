@@ -46,6 +46,9 @@ Separate boilerplate clauses (`COINCIDENTAL_FORMAT_MATCH`) from intentionally al
 ### 5. CI/CD Documentation Auditing
 Run in a GitHub Actions workflow or pre-commit hook to catch unauthorized copy-pasting across internal wikis or specification documents.
 
+### 6. LLM-Generated Article Screening (Hallucination Gate)
+Before publishing AI-assisted drafts, run the quantifier audit lane to catch ungrounded universal claims ("always", "never", "all ...") that carry neither a proof nor a complete enumeration — a deterministic footprint of hallucination.
+
 ---
 
 ## ⚡ Key Technical Advantages
@@ -154,8 +157,60 @@ Four independent hypotheses (`H1`–`H4`) are combined into a 4-bit mask, which 
 
 (The LUT classifies 15 of the 16 possible mask states. Exactly two states, `0001` and `1001`, where cluster membership would stand without any direct similarity evidence, are structurally unreachable; `1001` is defined in the table but is not producible by the current pipeline, and `0001` is the single state without a table entry. Three further states, `0011`, `0101`, and `0111`, arise via cluster promotion and are classified by their dedicated LUT entries.)
 
-> **Note on `H4` (cluster membership) and indirect chains**
+> **`H4` (cluster membership) and indirect chains**
 > `H4` is only set when a pair has *both* direct similarity evidence (`H2` or `H3`) *and* cluster membership of size ≥ 3. A pair with no direct evidence is never upgraded through cluster membership alone — such "telephone game" chains are reported separately as an indirect-chain warning on the dashboard, and the direct pair's own result is left unmodified.
+
+---
+
+## 🔍 Universal Quantifier Audit Lane (v1.2.0, extended in v1.3.0)
+
+Alongside pairwise similarity, `sieve_referee` provides a **separate-axis audit lane** that screens drafts for **ungrounded universal propositions** — a deterministic footprint of LLM hallucination.
+
+> **Operative definition**
+> *Closing a universal scope with neither a derivability backing (`⊢` — formal derivation) nor a finite-model exhaustion backing (`⊨_fin` — an actually-run complete enumeration) constitutes an **ungrounded universalization**. The audit lane detects it deterministically. Whether the detected universalization is a hallucination is a human disposition.*
+
+The engine **never evaluates truth values**; it only checks whether the author attached a backing tag. This makes it structurally immune to vacuous truths (universals over empty domains that are formally true) and keeps every judgment 100% reproducible.
+
+**Pipeline (every stage deterministic):**
+
+1. Sentence segmentation (。`！` `？` + newline)
+2. Exhaustive enumeration of universal-quantifier vocabulary (18 patterns, recall-first)
+3. `sentence_sha256` fingerprinting (the tagfile key)
+4. Human tagfile (`backing` / `scope`) — the engine never guesses
+5. 8-state audit LUT + `--fail-on-unverified` CI gate
+
+**Backing semantics (aligned with modern logic semantics):**
+
+| Tag | Logic semantics | Signal (universal scope) |
+|---|---|---|
+| `theorem` | `⊢` — derivability within a declared formal system | 🟢 GREEN |
+| `enumerated` | `⊨_fin` — finite-model exhaustion, actually executed | 🟢 GREEN |
+| `sample` | finite sample + explicit scope declaration | 🟡 YELLOW |
+| *(no tag)* | none of the above | 🔴 RED (`UNBACKED_UNIVERSAL`) |
+
+First-order validity over unrestricted domains (`⊨`) is undecidable (Church's theorem), so the engine accepts only the decidable fragment — `⊢` and `⊨_fin`. This is the theoretical form of the "the engine does not guess" principle.
+
+**Added in v1.3.0 — certainty markers:** co-occurrence of a universal quantifier with an epistemic intensifier (e.g. 「確実に」 "certainly", 「明白に」 "evidently") in the same sentence is annotated as `certainty_markers` on the human worksheet. Annotations never alter signals — GREEN/YELLOW/RED is decided solely by tags.
+
+**Audit lane CLI options:**
+
+| Option | Description |
+|---|---|
+| `--audit` | Enable the audit lane |
+| `--audit-vocab PATH` | Quantifier vocabulary file (default: built-in 18 patterns) |
+| `--audit-tags PATH` | Tagfile (JSON) keyed by `sentence_sha256` |
+| `--audit-modifier-vocab PATH` | Intensifier vocabulary file (v1.3.0) |
+| `--fail-on-unverified` | Exit code `1` if any unbacked universal (RED) remains |
+
+```bash
+# Audit a draft directory (non-zero exit on RED remnants)
+sieve-referee ./draft_dir --audit --fail-on-unverified
+
+# After human tagging (worksheet prints sentence hashes), re-run to verify
+sieve-referee ./draft_dir --audit --audit-tags tags.json --fail-on-unverified
+```
+
+Known limits: universal phrasings outside the vocabulary are missed (false-negative class); the truth of the tags themselves is the verifier's responsibility (recorded in the tagfile's `evidence` field).
 
 ---
 
