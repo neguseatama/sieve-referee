@@ -7,7 +7,7 @@ English | [日本語](README.ja.md)
 
 [![PyPI Version](https://img.shields.io/pypi/v/sieve-referee.svg)](https://pypi.org/project/sieve-referee/)
 [![Python Version](https://img.shields.io/pypi/pyversions/sieve-referee.svg)](https://pypi.org/project/sieve-referee/)
-[![CI](https://github.com/neguseatama/sieve-referee/actions/workflows/test.yml/badge.svg)](https://github.com/neguseatama/sieve-referee/actions/workflows/test.yml)
+[![CI](https://github.com/neguseatama/sieve-referee/actions/workflows/tests.yml/badge.svg)](https://github.com/neguseatama/sieve-referee/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 ---
