@@ -54,10 +54,6 @@ class TestEvaluatorBatch(unittest.TestCase):
         self.assertEqual(signal_str, "GREEN")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 _HIRA = ("あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほ"
          "まみむめもやゆよらりるれろわをんのことにはをいろはにほへと"
          "ちりぬるを")
@@ -114,3 +110,7 @@ class TestPromotedMasksHaveDedicatedEntries(unittest.TestCase):
             "docC.txt": _HIRA * 3 + "経理部" + _HIRA[:15] + "財務課" + _HIRA[:10],
         }
         self._assert_dedicated(docs, "0111", "RED")
+
+
+if __name__ == "__main__":
+    unittest.main()
