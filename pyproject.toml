@@ -13,6 +13,19 @@ authors = [{ name = "Kai IWASAKI" }]
 dependencies = [
     "sieve-core-engine>=1.0.0",
 ]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Linguistic",
+]
 
 [project.urls]
 Homepage = "https://github.com/neguseatama/sieve-referee"
