@@ -28,6 +28,7 @@ classifiers = [
 ]
 
 [project.urls]
+"Bug Tracker" = "https://github.com/neguseatama/sieve-referee/issues"
 Homepage = "https://github.com/neguseatama/sieve-referee"
 Repository = "https://github.com/neguseatama/sieve-referee.git"
 "Related Project (Sieve-Core)" = "https://github.com/neguseatama/sieve-core"
