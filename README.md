@@ -162,7 +162,7 @@ Four independent hypotheses (`H1`–`H4`) are combined into a 4-bit mask, which 
 
 ---
 
-## 🔍 Universal Quantifier Audit Lane (v1.2.0, extended in v1.3.0)
+## 🔍 Universal Quantifier Audit Lane (introduced in v1.3.0)
 
 Alongside pairwise similarity, `sieve_referee` provides a **separate-axis audit lane** that screens drafts for **ungrounded universal propositions** — a deterministic footprint of LLM hallucination.
 
