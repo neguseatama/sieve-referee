@@ -152,7 +152,7 @@ Four independent hypotheses (`H1`–`H4`) are combined into a 4-bit mask, which 
 | `1011` | 🔴 RED | `CLUSTER_PARAPHRASE_GROUP` | Paraphrased reuse confirmed within a 3+ document cluster. |
 | `1111` | 🔴 RED | `CLUSTER_EXACT_COPY` | Exact/templated copy confirmed within a 3+ document cluster. |
 | `0111` | 🔴 RED | `CLUSTER_FORMATTED_PARAPHRASE` | Paraphrased reuse in shared structure recurring within a 3+ document cluster. |
-| `0101` | 🔴 YELLOW | `CLUSTER_FORMAT_ONLY_MATCH` | Shared template structure within a 3+ document cluster; content independent. |
+| `0101` | 🟡 YELLOW | `CLUSTER_FORMAT_ONLY_MATCH` | Shared template structure within a 3+ document cluster; content independent. |
 | `0011` | 🔴 RED | `CLUSTER_UNFORMATTED_CONTENT_COPY` | Unformatted content copy recurring within a 3+ document cluster. |
 
 (The LUT classifies 15 of the 16 possible mask states. Exactly two states, `0001` and `1001`, where cluster membership would stand without any direct similarity evidence, are structurally unreachable; `1001` is defined in the table but is not producible by the current pipeline, and `0001` is the single state without a table entry. Three further states, `0011`, `0101`, and `0111`, arise via cluster promotion and are classified by their dedicated LUT entries.)

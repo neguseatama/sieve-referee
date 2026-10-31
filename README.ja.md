@@ -151,9 +151,9 @@ sieve-referee ./target_documents -j 4
 | `1010` | 🔴 RED | `PARAPHRASE_DETECTED` | 構造は異なるが内容が一致（言い換え）。 |
 | `1011` | 🔴 RED | `CLUSTER_PARAPHRASE_GROUP` | 3件以上のクラスタ内での組織的な言い換え。 |
 | `1111` | 🔴 RED | `CLUSTER_EXACT_COPY` | 3件以上のクラスタ内での完全一致・テンプレート複製。 |
-| `0111` | 🔴 RED | `CLUSTER_FORMATTED_PARAPHRASE` | Paraphrased reuse in shared structure recurring within a 3+ document cluster. |
-| `0101` | 🔴 YELLOW | `CLUSTER_FORMAT_ONLY_MATCH` | Shared template structure within a 3+ document cluster; content independent. |
-| `0011` | 🔴 RED | `CLUSTER_UNFORMATTED_CONTENT_COPY` | Unformatted content copy recurring within a 3+ document cluster. |
+| `0111` | 🔴 RED | `CLUSTER_FORMATTED_PARAPHRASE` | 3件以上のクラスタ内での、共通構造を用いた言い換え再利用。 |
+| `0101` | 🟡 YELLOW | `CLUSTER_FORMAT_ONLY_MATCH` | 3件以上のクラスタ内での共通テンプレート/構造の一致のみ（内容は独自）。 |
+| `0011` | 🔴 RED | `CLUSTER_UNFORMATTED_CONTENT_COPY` | 3件以上のクラスタ内での、構造的共通性のない内容複製。 |
 
 （16通りのうちLUTに分類されるのは15状態です。このうち `0001` と `1001` の2状態——直接の類似根拠なしにクラスタ所属だけが立つ状態——は構造的に到達不能で、`1001` は定義こそ存在するものの現在の実装経路では生成されず、`0001` は表に定義のない唯一の状態です。さらに `0011`・`0101`・`0111` の3状態はクラスタ昇格で発生し、専用のLUTエントリで分類されます。）
 
