@@ -1,4 +1,4 @@
-# Sieve Referee v1.4.0
+# Sieve Referee v1.5.0
 
 [English](README.md) | 日本語
 
@@ -174,7 +174,7 @@ sieve-referee ./target_documents -j 4
 **パイプライン（全段階が決定論的）:**
 
 1. 文分割（`ja`: 。「！」「？」+ 改行 / `en`: 小数・次文字・省略形ガードつきの `.` + `!` `?` 改行）
-2. 全称量化語彙の全列挙（`ja`: 18 パターン・recall 重視 / `en`: 13 パターン・小文字宣言・単語境界照合）
+2. 全称量化語彙の全列挙（`ja`: 21 パターン・recall 重視 / `en`: 17 パターン・小文字宣言・単語境界照合）
 3. `sentence_sha256` による指紋化（tagfile の鍵）
 4. Human tagfile（`backing` / `scope`）— エンジンは推測しない
 5. 8 状態監査 LUT + `--fail-on-unverified` CI ゲート
@@ -194,13 +194,28 @@ sieve-referee ./target_documents -j 4
 
 **v1.4.0 で追加 — 英語プロファイル（`--lang`）:** 監査レーンに英語専用プロファイルが加わりました。`--lang {ja,en,auto}` が語彙・文分割・照合・理由文を 1 セットで切り替えます（既定 `ja` は v1.3.1 と 1 バイトも変わりません）:
 
-- **`en` 語彙（13 パターン・小文字宣言）:** all / every / everyone / everybody / everything / each / any / none / neither / both / no / must / without exception。時間絶対語（always / never / invariably / permanently）は、日本語側と同じ誤検出リスクの理由で初版には含めず、様相・時間スコープ拡張（#1）着手時に ja/en の一括整理を行います。
+- **`en` 語彙（17 パターン・小文字宣言）:** all / every / everyone / everybody / everything / each / any / none / neither / both / no / must / without exception に、v1.5.0 で低リスク時間絶対語 4 語（invariably / without fail / around the clock / 24/7）を追加。always / never / permanently は日本語側と同じ誤検出リスクの理由（*not always / never mind / as always* 等の非主張用法が体系的に多い）で恒久不採用 — v1.5.0 で恒久決定として決着しました。
 - **単語境界照合**（大文字小文字を無視・長さ保存の小文字化）: all は *ballot / allow / small / alloy* の内部に一致しなくなり、no は *notify / nobody* の内部に、every は *everywhere* の内部に一致しません。
 - **除外フレーズ（34・決定論的）:** 語境界一致した除外フレーズ（*not all, at all, after all, all but, all rights, each other, every now and then, if any, no longer, no doubt, no.* 等）と重なる出現だけが除外され、文自体は対象に残ります。`All rights are reserved.` は候補にならず、`All nodes must sync.` は候補になります。
 - **疑問文除外:** `?` で終わる文は `en` では監査対象外です（疑問は全称主張ではない）。日本語の `？` 終端文は従来どおり候補になります（変更なし）。
 - **理由文:** 監査レーンの `reason` は英語テーブル（`AUDIT_LUT_REASONS_EN`）を持ち、8 状態・シグナル・`pattern_name` は日本語 LUT と完全に同一です。
 - **`auto`**: 読み込んだ全文書のかな文字（ひらがな+カタカナ）比率による決定論的判定（比率 ≥ 0.05 なら `ja`、それ以外 `en`）。CI では `--lang` の明示指定を推奨（`auto` は利便性用）。
 - 日英 54 ケースの対訳コーパス（等価全称・除外フレーズ罠・単語境界罠・疑問文・強意語共起・裏づけつきペア）が `tests/test_quantifier_audit_en.py` に cross-lingual 動作を機械固定しています。
+
+**v1.5.0 で追加 — 様相・時間スコープ拡張（`#1`）:** 語彙に承認済み低リスク子集を追加しました:
+
+- **ja 量化子 +3（18 → 21）:** 絶えず / 四六時中 / 24時間365日。不採用（誤検出リスク）: 常時（非常時との部分文字列衝突）・24時間（24時間以内等の期限用法）・全く（裸強調）。既存 18 語は 1 語も変更していません。
+- **en 量化子 +4（13 → 17）:** invariably / without fail / around the clock / 24/7。forever は慣用衝突（*nothing lasts forever* 等）で不採用、*at all times* / *every time* は既存 all / every が単語境界で捕捉済みのため重複登録せず。既知の衝突: 日付表記（24/7/2025 等）が候補になり得ます（recall 重視・Human が数秒で処分）。
+- **ja 修飾語 +7（10 → 17）/ en 修飾語 +8（9 → 17）・注記専用:** 必然的に / 不可避的に / 自ずと / おのずと / 疑いようがない / 疑いようもない / 言うまでもなく および unquestionably / indisputably / beyond doubt / by definition / self-evidently / manifestly / as everyone knows / it goes without saying。認識的必然マーカーは GREEN/YELLOW/RED を一切変えません（LUT 意味論は無変更）。構造必然表現（構造上 / *by design* / *structurally*）は設計制約の叙述であり認識的過剰主張でないため不採用。日本語は副詞形のみ採用し、「必然ではない」等の否定形を注記しません。
+- **コーパス +24 ケース（F/G/H 区分）:** 時間絶対語の対訳等価（両言語 RED）・新マーカー注記（シグナル不変・定理タグで GREEN）・不採用語トリップワイヤと極性ガード（「疑問の余地がある」は注記しない）— 合計 78 ケース（セクション 74 項目 + 裏づけつきペア 4）。
+
+**v1.5.0 で追加 — 位置ベース Audit Risk Index（`--risk-index`・`#4`）:** RED の処分順序を、位置ベースの 3 シグナルのみ（文依存案は破棄済み）から決定論的に整序します:
+
+- **見出し階層深度** — markdown ATX 見出し（`#`〜`######`・フェンス内は無視）を決定論的に走査し、候補の直前の最後の見出しの深度を引き継ぐ。深度 0（冒頭サマリ）が最重視。番号付き見出し（「1.1」「第 1 章」）は平文扱い。
+- **セクション内出現順** — 同一セクション内での出現順（最初の主張がセクションの論点）で、1 番目が最重視。
+- **節内密度** — 当該文に含まれる全称語パターン数（1 / 2 / 3+）。
+
+`risk_index = round_half_up(0.40·H(d) + 0.30·O(rank) + 0.30·D(n))`、35–100 の整数。重みはすべて固定の千分率定数として receipt に記録され、計算は純粋な整数演算（round-half-up・浮動小数の丸め込みなし）。`--risk-index` は**既定 OFF**: 指定しない限り receipt もレポートも従来版と 1 バイトも変わりません。指定すると各候補に `risk_index` + `risk_factors` が付き、人間用レポートに RED を降順で並べた `PRIORITY` セクションが追加されます。シグナルは一切変わりません。
 
 ```bash
 # 英語の下書きディレクトリを監査
@@ -215,10 +230,11 @@ sieve-referee ./mixed_dir --audit --lang auto
 | オプション | 説明 |
 |---|---|
 | `--audit` | 監査レーンを有効化 |
-| `--audit-vocab PATH` | 全称語彙ファイル（未指定: 内蔵 18 パターン） |
+| `--audit-vocab PATH` | 全称語彙ファイル（未指定: 内蔵 21 パターン） |
 | `--audit-tags PATH` | tagfile（JSON・`sentence_sha256` を鍵） |
 | `--audit-modifier-vocab PATH` | 強意語彙ファイル（v1.3.0） |
 | `--lang ja\|en\|auto` | 監査レーンの言語プロファイル（v1.4.0・既定 `ja`） |
+| `--risk-index` | 位置ベース Audit Risk Index（v1.5.0・`risk_index`/`risk_factors` 付与 + RED `PRIORITY` セクション・既定 OFF） |
 | `--fail-on-unverified` | 裏付けのない全称（RED）が 1 件でも残れば終了コード `1` |
 
 ```bash
@@ -229,7 +245,7 @@ sieve-referee ./draft_dir --audit --fail-on-unverified
 sieve-referee ./draft_dir --audit --audit-tags tags.json --fail-on-unverified
 ```
 
-既知の限界: 語彙にない全称表現は拾えません（偽陰性クラス）。タグ自体の真偽は検証者の責任です（tagfile の `evidence` フィールドに出所を記録）。英語固有の限界: `en` 語彙は表層一致・小文字宣言のため、*anybody / nobody* のような形態変化形は列挙しておらず取りこぼします。省略形ガードは固定リストのため万能ではありません。除外フレーズは経験的なリストであり、文法から導出されるのではなく対訳コーパスで固定・拡張されます。
+既知の限界: 語彙にない全称表現は拾えません（偽陰性クラス）。タグ自体の真偽は検証者の責任です（tagfile の `evidence` フィールドに出所を記録）。英語固有の限界: `en` 語彙は表層一致・小文字宣言のため、*anybody / nobody* のような形態変化形は列挙しておらず取りこぼします。省略形ガードは固定リストのため万能ではありません。除外フレーズは経験的なリストであり、文法から導出されるのではなく対訳コーパスで固定・拡張されます。v1.5.0 追加分: `--risk-index` の見出し走査は markdown ATX のみ（番号付き・日本語様式の見出しは平文扱い）。修飾語（強意語）レーンには否定ガードがなく、"not necessarily" 等は誤注記になります（recall 重視）。`24/7` は日付表記と衝突し得ます。時間絶対語 always / never は `en` 側では恒久不採用のため拾えません（ja 側は v1.3.0 coverage の常時系 = 常に / 決して等を維持）。
 
 ---
 

@@ -1,4 +1,4 @@
-# Sieve Referee v1.4.0
+# Sieve Referee v1.5.0
 
 English | [日本語](README.ja.md)
 
@@ -174,7 +174,7 @@ The engine **never evaluates truth values**; it only checks whether the author a
 **Pipeline (every stage deterministic):**
 
 1. Sentence segmentation (`ja`: 。`！` `？` + newline / `en`: `.` with decimal, next-char and abbreviation guards + `!` `?` newline)
-2. Exhaustive enumeration of universal-quantifier vocabulary (`ja`: 18 patterns, recall-first / `en`: 13 lowercase patterns matched at word boundaries)
+2. Exhaustive enumeration of universal-quantifier vocabulary (`ja`: 21 patterns, recall-first / `en`: 17 lowercase patterns matched at word boundaries)
 3. `sentence_sha256` fingerprinting (the tagfile key)
 4. Human tagfile (`backing` / `scope`) — the engine never guesses
 5. 8-state audit LUT + `--fail-on-unverified` CI gate
@@ -194,13 +194,28 @@ First-order validity over unrestricted domains (`⊨`) is undecidable (Church's 
 
 **Added in v1.4.0 — English profile (`--lang`):** the audit lane now runs a dedicated English profile. `--lang {ja,en,auto}` selects the vocabulary, sentence splitting, matching and reason strings as one unit (default `ja` keeps v1.3.1 behavior byte-identical):
 
-- **`en` vocabulary (13 lowercase patterns):** all / every / everyone / everybody / everything / each / any / none / neither / both / no / must / without exception. Temporal absolutes (`always`, `never`, `invariably`, `permanently`) are deliberately excluded from the first English vocabulary for the same false-positive reason as on the Japanese side; the unified ja/en cleanup is deferred to the modal/temporal scope extension.
+- **`en` vocabulary (17 lowercase patterns):** all / every / everyone / everybody / everything / each / any / none / neither / both / no / must / without exception, plus the temporal-absolute low-risk subset added in v1.5.0 (invariably / without fail / around the clock / 24/7). `always`, `never` and `permanently` remain permanently excluded for the same false-positive reason as on the Japanese side (systematic non-assertive frames such as *not always / never mind / as always*) — settled as a permanent decision in v1.5.0.
 - **Word-boundary matching** (case-insensitive, length-preserving lowering): `all` no longer matches inside *ballot / allow / small / alloy*; `no` not inside *notify / nobody*; `every` not inside *everywhere*.
 - **Exclusion phrases (34, deterministic):** an occurrence overlapping a boundary-aligned phrase — *not all, at all, after all, all but, all rights, each other, every now and then, if any, no longer, no doubt, no., ...* — is dropped per occurrence; the sentence itself stays in scope. `All rights are reserved.` produces no candidate, while `All nodes must sync.` does.
 - **Interrogative exclusion:** sentences ending with `?` are out of audit scope for `en` (any questions are not universal claims). Japanese `？` sentences remain candidates, exactly as before.
 - **Reason strings:** the audit lane's `reason` field has a full English table (`AUDIT_LUT_REASONS_EN`) with the same 8 states, signals and `pattern_name` values as the Japanese LUT.
 - **`auto`** resolves deterministically by the kana (hiragana + katakana) ratio over all loaded documents: ratio ≥ 0.05 → `ja`, else `en`. CI runs should pass `--lang` explicitly; `auto` is a convenience.
 - A 54-case ja↔en parallel corpus (equivalent universals, exclusion traps, boundary traps, interrogatives, intensifier co-occurrence, backed pairs) pins the cross-lingual behavior in `tests/test_quantifier_audit_en.py`.
+
+**Added in v1.5.0 — modal/temporal scope (`#1`):** the vocabularies gain the approved low-risk subset of modal/temporal expressions:
+
+- **ja quantifiers +3 (18 → 21):** 絶えず / 四六時中 / 24時間365日. Rejected on false-positive risk: 常時 (substring collision with 非常時 "emergency"), 24時間 (deadline usage such as 24時間以内 "within 24 hours"), 全く (bare intensifier). The existing 18 Japanese patterns are kept verbatim.
+- **en quantifiers +4 (13 → 17):** invariably / without fail / around the clock / 24/7. `forever` is rejected for idiom collisions (*nothing lasts forever*); *at all times* / *every time* are redundant because `all` / `every` already match them at word boundaries. Known collision: date notations such as `24/7/2025` may produce a candidate (recall-first; disposed by a human in seconds).
+- **ja modifiers +7 (10 → 17) / en modifiers +8 (9 → 17), annotation-only:** 必然的に / 不可避的に / 自ずと / おのずと / 疑いようがない / 疑いようもない / 言うまでもなく and unquestionably / indisputably / beyond doubt / by definition / self-evidently / manifestly / as everyone knows / it goes without saying. Epistemic-necessity markers never change GREEN/YELLOW/RED (LUT semantics untouched). Structural-necessity phrasings (構造上 / *by design* / *structurally*) are excluded by design — they describe design constraints, not epistemic overreach. Japanese adverbs are adopted only in adverbial form so that negative forms such as 「必然ではない」 are not annotated.
+- **Corpus +24 cases (sections F/G/H):** temporal equivalents (both languages RED), new-marker annotations (signal unchanged, GREEN under a theorem tag), rejected-word tripwires and polarity guards (「疑問の余地がある」 annotates nothing) — 78 cases total (74 section entries + 4 backed pairs).
+
+**Added in v1.5.0 — positional Audit Risk Index (`--risk-index`, `#4`):** RED dispositions get a deterministic triage score built from three position-based signals only (the dependency-based plan was discarded):
+
+- **Heading depth** — markdown ATX headings (`#`..`######`, fenced code blocks ignored) are scanned deterministically; a candidate inherits the depth of the last heading before it. Depth 0 (executive summary before any heading) weighs highest. Numbered headings ("1.1", "第 1 章") are treated as plain text.
+- **Section order** — the candidate's rank inside its section (the first claim is the thesis claim) weighs highest.
+- **In-sentence density** — the number of quantifier patterns in the sentence (1 / 2 / 3+).
+
+`risk_index = round_half_up(0.40·H(d) + 0.30·O(rank) + 0.30·D(n))`, a 35–100 integer. All weights are frozen per-mille constants recorded in the receipt; the computation is pure integer arithmetic (round-half-up, no float rounding). `--risk-index` is **off by default**: without it, receipts and reports stay byte-identical to previous versions. With it, each candidate carries `risk_index` + `risk_factors`, and the human report gains a `PRIORITY` section listing RED candidates in descending score. Signals are never changed.
 
 ```bash
 # Audit an English draft directory
@@ -215,10 +230,11 @@ sieve-referee ./mixed_dir --audit --lang auto
 | Option | Description |
 |---|---|
 | `--audit` | Enable the audit lane |
-| `--audit-vocab PATH` | Quantifier vocabulary file (default: built-in 18 patterns) |
+| `--audit-vocab PATH` | Quantifier vocabulary file (default: built-in 21 patterns) |
 | `--audit-tags PATH` | Tagfile (JSON) keyed by `sentence_sha256` |
 | `--audit-modifier-vocab PATH` | Intensifier vocabulary file (v1.3.0) |
 | `--lang ja\|en\|auto` | Audit language profile (v1.4.0; default `ja`) |
+| `--risk-index` | Positional Audit Risk Index (v1.5.0; adds `risk_index`/`risk_factors` + RED `PRIORITY` section; default off) |
 | `--fail-on-unverified` | Exit code `1` if any unbacked universal (RED) remains |
 
 ```bash
@@ -229,7 +245,7 @@ sieve-referee ./draft_dir --audit --fail-on-unverified
 sieve-referee ./draft_dir --audit --audit-tags tags.json --fail-on-unverified
 ```
 
-Known limits: universal phrasings outside the vocabulary are missed (false-negative class); the truth of the tags themselves is the verifier's responsibility (recorded in the tagfile's `evidence` field). English-specific: the `en` vocabulary is surface-literal and lowercase-declared (morphological variants such as *anybody/nobody* are not enumerated and are missed); the fixed abbreviation guard list cannot cover every abbreviation; and the exclusion phrase list is empirical — it is pinned and extended through the parallel corpus, not derived from a grammar.
+Known limits: universal phrasings outside the vocabulary are missed (false-negative class); the truth of the tags themselves is the verifier's responsibility (recorded in the tagfile's `evidence` field). English-specific: the `en` vocabulary is surface-literal and lowercase-declared (morphological variants such as *anybody/nobody* are not enumerated and are missed); the fixed abbreviation guard list cannot cover every abbreviation; and the exclusion phrase list is empirical — it is pinned and extended through the parallel corpus, not derived from a grammar. v1.5.0 additions: the heading scan behind `--risk-index` is markdown-ATX-only (numbered/Japanese-style headings count as plain text); the modifier (intensifier) lane has no negation guard, so e.g. "not necessarily" is annotated as a certainty marker (recall-first); `24/7` may collide with date notations; temporal absolutes `always`/`never` are still missed on the `en` side (permanent decision) while the Japanese side keeps its v1.3.0 coverage (常に/決して/…).
 
 ---
 
