@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from .models import SignalColor
+from .risk_index import RISK_INDEX_META, annotate_candidates
 
 # ---------------------------------------------------------------------------
 # 既定語彙(sha256 pin: 77d1258ed86a30de952ee9f43cc3bdab0e8f13870f435308b9782c514a8442c1)
@@ -533,6 +534,7 @@ def audit_documents(documents: Dict[str, str],
                     tags: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
                     modifier_vocab: Optional[Tuple[str, ...]] = None,
                     lang: str = "ja",
+                    risk_index: bool = False,
                     ) -> QuantifierAuditReport:
     """文書辞書(item_id -> text)を監査レーンに通す。
 
@@ -549,6 +551,10 @@ def audit_documents(documents: Dict[str, str],
       言語間で同一、reason のみ言語別。明示語彙ファイルが指定された場合、
       語彙のみ上書きされ(言語の既定語彙は使われない)、分分割・照合・理由文は
       lang に従う。
+    - risk_index=True の場合は位置ベース Audit Risk Index(#4)を候補に注記する
+      (risk_index と risk_factors・receipt に重みテーブル)。判定は変わらない。
+      False(既定)では receipt に risk_index 関連のキーは現れない(v1.4.0 と
+      1 バイトも同一)。
     """
     if lang not in AUDIT_LANGS:
         raise ValueError("unsupported audit lang: %r (valid: %s)"
@@ -595,6 +601,9 @@ def audit_documents(documents: Dict[str, str],
             cand["reason"] = reason
             tag_totals[cand["backing"]] += 1
 
+        if risk_index:
+            annotate_candidates(text, cands)
+
         signal_counts = {"GREEN": 0, "YELLOW": 0, "RED": 0}
         for cand in cands:
             signal_counts[cand["signal"]] += 1
@@ -627,12 +636,14 @@ def audit_documents(documents: Dict[str, str],
         "certainty_flagged": total_certainty_flagged,
         "unused_tags": unused_tags,
     }
+    if risk_index:
+        receipt["risk_index"] = RISK_INDEX_META
     return QuantifierAuditReport(receipt=receipt, worksheets=worksheets)
 
 
 def _public_candidate(cand: Dict) -> Dict:
     """Machine Receipt 用の候補(本文を除く・Redact 慣行の継承)。"""
-    return {
+    pub = {
         "seq": cand["seq"],
         "start": cand["start"],
         "end": cand["end"],
@@ -647,6 +658,10 @@ def _public_candidate(cand: Dict) -> Dict:
         "reason": cand["reason"],
         "evidence": cand["evidence"],
     }
+    if "risk_index" in cand:  # --risk-index 指定時のみ(後方互換)
+        pub["risk_index"] = cand["risk_index"]
+        pub["risk_factors"] = cand["risk_factors"]
+    return pub
 
 
 # ---------------------------------------------------------------------------
@@ -714,6 +729,24 @@ def format_audit_report(report: QuantifierAuditReport) -> str:
             if cand["evidence"]:
                 lines.append("      evidence: %s" % cand["evidence"])
             lines.append("      reason: %s" % cand["reason"])
+    risk_meta = receipt.get("risk_index")
+    if risk_meta and risk_meta.get("enabled"):
+        ranked = []
+        for doc in receipt["documents"]:
+            item_id = doc["item_id"]
+            ws = report.worksheets.get(item_id, [])
+            for cand, full in zip(doc["candidates"], ws):
+                if cand["signal"] == "RED":
+                    ranked.append((-cand["risk_index"], item_id, cand["seq"], cand, full))
+        ranked.sort(key=lambda t: (t[0], t[1], t[2]))
+        lines.append("--- PRIORITY (positional risk index, RED only) ---")
+        for _neg, item_id, _seq, cand, full in ranked:
+            factors = cand["risk_factors"]
+            lines.append("  [%s #%d] risk=%d depth=%d rank=%d patterns=%d" % (
+                item_id, cand["seq"], cand["risk_index"],
+                factors["heading_depth"], factors["section_rank"],
+                factors["pattern_count"]))
+            lines.append("      text: %s" % full["sentence_text"])
     if receipt["unused_tags"]:
         lines.append("unused tags (not matched to any candidate): %d" % len(receipt["unused_tags"]))
         for key in receipt["unused_tags"]:

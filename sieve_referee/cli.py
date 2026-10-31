@@ -64,12 +64,17 @@ def main():
                         help="裏づけタグファイル(JSON: sentence_sha256 -> backing/scope)")
     parser.add_argument("--lang", type=str, default="ja", choices=("ja", "en", "auto"),
                         help="監査レーンの言語プロファイル(ja | en | auto)。既定は ja。")
+    parser.add_argument("--risk-index", action="store_true",
+                        help="位置ベース Audit Risk Index(#4)を候補に付与し、"
+                             "人間用レポートに RED の PRIORITY 一覧(降順)を追加する。"
+                             "指定しない限り receipt は 1 バイトも変わらない")
     parser.add_argument("--fail-on-unverified", action="store_true",
                         help="監査 RED(裏づけのない全称文)が 1 件でもあれば終了コード 1")
     args = parser.parse_args()
 
     audit_enabled = (args.audit or args.audit_vocab or args.audit_tags
-                     or args.audit_modifier_vocab or args.fail_on_unverified)
+                     or args.audit_modifier_vocab or args.fail_on_unverified
+                     or args.risk_index)
 
     target_path = Path(args.target_dir)
     if not target_path.exists() or not target_path.is_dir():
@@ -102,7 +107,8 @@ def main():
             sys.exit(2)
         audit_lang = resolve_audit_lang(doc_dict, args.lang)
         audit_report = audit_documents(doc_dict, vocab=vocab, tags=tags,
-                                       modifier_vocab=modifiers, lang=audit_lang)
+                                       modifier_vocab=modifiers, lang=audit_lang,
+                                       risk_index=args.risk_index)
 
     if args.json:
         if audit_enabled:
