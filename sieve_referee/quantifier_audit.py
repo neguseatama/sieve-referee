@@ -58,6 +58,43 @@ DEFAULT_MODIFIER_VOCAB: Tuple[str, ...] = (
     "間違いなく", "疑いなく", "自明に", "例外なく", "一切",
 )
 
+# ---------------------------------------------------------------------------
+# 英語既定語彙 v1(案 3・日英クロスリンガル 2026-10-31)
+# 方針: ja v1 と同一の recall 重視。語は小文字で宣言し、単語境界で照合する。
+# - 時間絶対語(always/never/invariably/permanently)は初版に含めない
+#   (ja 側の「常に」系と同様、非主張用法の誤検出リスクが高い — #1 着手時に一括整理)
+# - any は ja v1 の「任意の/どの」に相当する全称語であり、
+#   対訳検証の整合のため含める(除外フレーズ+疑問文除外で管理)
+# ---------------------------------------------------------------------------
+DEFAULT_VOCAB_EN: Tuple[str, ...] = (
+    "all", "every", "everyone", "everybody", "everything", "each",
+    "any", "none", "neither", "both", "no", "must", "without exception",
+)
+
+DEFAULT_MODIFIER_VOCAB_EN: Tuple[str, ...] = (
+    "clearly", "obviously", "undeniably", "undoubtedly", "certainly",
+    "definitely", "inevitably", "necessarily", "absolutely",
+)
+
+# ---------------------------------------------------------------------------
+# 英語除外フレーズ v1(決定論的)
+# 候補語の直前・直後がこれらのフレーズの語境界一致に含まれる場合、
+# その出現のみを候補から除外する(文は除外しない — recall 重視の継承)。
+# 例: "All rights are reserved." は all が出ても候補にならない。
+#     "All nodes must sync." は候補になる。
+# ---------------------------------------------------------------------------
+EXCLUSION_PHRASES_EN: Tuple[str, ...] = (
+    "not all", "at all", "in all", "after all", "all but",
+    "all rights", "all of a sudden", "once and for all", "for all i know",
+    "not every", "every now and then", "every other", "every so often",
+    "not everyone", "not everybody", "not everything",
+    "each other",
+    "if any", "without any", "hardly any", "barely any", "scarcely any",
+    "any more", "any longer", "in any case", "at any rate",
+    "no longer", "no more", "no doubt", "no wonder", "no matter",
+    "no way", "no less", "no.",
+)
+
 VALID_BACKINGS = ("theorem", "enumerated", "sample")
 VALID_SCOPES = ("universal", "measured")
 DEFAULT_BACKING = "unbacked"
@@ -65,6 +102,112 @@ DEFAULT_SCOPE = "universal"
 
 _SENTENCE_TERMINATORS = ("。", "！", "？", "\n")
 _MEASURE_HINT_CHARS = tuple("0123456789％%割")
+
+# 英語の文分割用定数(案 C・省略形ガードの固定リスト)
+_EN_SENTENCE_TERMINATORS = (".", "!", "?", "\n")
+# このリストは分割点の判定のみに使う(照合はしない)。小文字で宣言する。
+_EN_ABBREVIATIONS = frozenset((
+    "mr.", "mrs.", "ms.", "dr.", "prof.", "vs.", "etc.", "e.g.", "i.e.",
+    "cf.", "al.", "fig.", "eq.", "approx.", "ltd.", "inc.", "corp.",
+    "no.", "u.s.",
+))
+# 単語境界判定で「語の内部」とみなす文字(ハイフン・アポストロフィは境界。
+# そのため everyone's の everyone は候補になり、all-in-one の all も候補になる)。
+_EN_WORD_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
+
+
+def _ascii_lower(text: str) -> str:
+    """長さを保存する ASCII 小文字化(NFKC 済み入力に対する決定論的演算)。
+
+    str.lower() は一部の非 ASCII 文字で長さが変わるため使わない。
+    """
+    return "".join(
+        chr(ord(c) + 32) if "A" <= c <= "Z" else c for c in text)
+
+
+def _is_en_sentence_period(text: str, i: int) -> bool:
+    """text[i] の "." が文の終端子であるかを決定論的に判定する。
+
+    - 小数ガード: 直前と直後が数字("3.14")の "." は終端子でない
+    - 次文字ガード: 直後が空白でない("run.py")"." は終端子でない
+    - 省略形ガード: その "." で終わるトークン(英字と "." の連なり)が
+      _EN_ABBREVIATIONS に一致する場合は終端子でない
+    """
+    if 0 < i < len(text) - 1 and text[i - 1].isdigit() and text[i + 1].isdigit():
+        return False
+    if i + 1 < len(text) and not text[i + 1].isspace():
+        return False
+    j = i
+    while j > 0 and (text[j - 1].isalpha() or text[j - 1] == "."):
+        j -= 1
+    if _ascii_lower(text[j:i + 1]) in _EN_ABBREVIATIONS:
+        return False
+    return True
+
+
+def _split_sentences_en(text: str) -> List[Dict]:
+    """英語用の決定論的文分割。
+
+    分割点 = "."(ガード通過時)・"!"・"?"・改行の直後。
+    ガードは _is_en_sentence_period を参照(小数・次文字・省略形)。
+    """
+    sentences: List[Dict] = []
+    n = len(text)
+    start = 0
+    for i, ch in enumerate(text):
+        if ch not in _EN_SENTENCE_TERMINATORS:
+            continue
+        if ch == "." and not _is_en_sentence_period(text, i):
+            continue
+        _append_sentence(sentences, text, start, i + 1)
+        start = i + 1
+    if start < n:
+        _append_sentence(sentences, text, start, n)
+    return sentences
+
+
+def _find_boundary_hits(lowered_text: str, pattern_lower: str) -> List[int]:
+    """小文字化済みテキスト内の語境界一致位置を全件返す(決定論的)。
+
+    パターン自体も小文字で宣言されていることを前提とする。
+    語境界 = 出現範囲の直前・直後が _EN_WORD_CHARS でないこと。
+    """
+    hits: List[int] = []
+    plen = len(pattern_lower)
+    if plen == 0:
+        return hits
+    pos = lowered_text.find(pattern_lower)
+    while pos != -1:
+        before_ok = pos == 0 or lowered_text[pos - 1] not in _EN_WORD_CHARS
+        end = pos + plen
+        after_ok = end >= len(lowered_text) or lowered_text[end] not in _EN_WORD_CHARS
+        if before_ok and after_ok:
+            hits.append(pos)
+        pos = lowered_text.find(pattern_lower, pos + 1)
+    return hits
+
+
+def _exclusion_spans(lowered_text: str,
+                     exclusion_phrases: Tuple[str, ...]) -> List[Tuple[int, int]]:
+    """除外フレーズの語境界一致区間を全件返す(決定論的)。
+
+    フレーズも小文字で宣言されていることを前提とする。
+    """
+    spans: List[Tuple[int, int]] = []
+    for phrase in exclusion_phrases:
+        for pos in _find_boundary_hits(lowered_text, phrase):
+            spans.append((pos, pos + len(phrase)))
+    return spans
+
+
+def _hits_excluded(hit_start: int, hit_end: int,
+                   spans: List[Tuple[int, int]]) -> bool:
+    """候補出現が除外区間と重なるかを判定する(区間の重なり = 除外)。"""
+    for span_start, span_end in spans:
+        if hit_start < span_end and span_start < hit_end:
+            return True
+    return False
 
 # ---------------------------------------------------------------------------
 # 監査 LUT(8 状態): (backing, scope) -> (signal, pattern_name, reason)
@@ -97,6 +240,41 @@ AUDIT_LUT: Dict[Tuple[str, str], Tuple[SignalColor, str, str]] = {
          "裏づけタグのない実測形の文です。数値の出自(確定手段)を確認してください。"),
 }
 
+# ---------------------------------------------------------------------------
+# 英語理由文テーブル(en レーン用)。signal と pattern_name は AUDIT_LUT と
+# 完全同一(1 対 1)。reason のみ言語別。8 状態すべてを定義する。
+# ---------------------------------------------------------------------------
+AUDIT_LUT_REASONS_EN: Dict[Tuple[str, str], str] = {
+    ("theorem", "universal"):
+        "Universal claim backed by a theorem (closed-form derivation within a "
+        "declared formal system).",
+    ("theorem", "measured"):
+        "Measured-form sentence backed by a theorem (backing is redundant but "
+        "consistent).",
+    ("enumerated", "universal"):
+        "Universal claim backed by exhaustive enumeration.",
+    ("enumerated", "measured"):
+        "Measured-form sentence backed by exhaustive enumeration.",
+    ("sample", "universal"):
+        "Universal claim backed only by a finite sample. Escalate via exhaustive "
+        "enumeration or down-scope to measured form.",
+    ("sample", "measured"):
+        "Sentence backed as a finite sample with an explicit scope declaration.",
+    ("unbacked", "universal"):
+        "Universal claim without backing (hallucination candidate). Back it by "
+        "exhaustive enumeration or down-scope to measured form before publishing.",
+    ("unbacked", "measured"):
+        "Measured-form sentence without a backing tag. Verify the provenance "
+        "(confirmation method) of the numbers.",
+}
+
+AUDIT_LANGS = ("ja", "en")
+
+LANG_DEFAULTS: Dict[str, Dict[str, Tuple[str, ...]]] = {
+    "ja": {"vocab": DEFAULT_VOCAB, "modifier_vocab": DEFAULT_MODIFIER_VOCAB},
+    "en": {"vocab": DEFAULT_VOCAB_EN, "modifier_vocab": DEFAULT_MODIFIER_VOCAB_EN},
+}
+
 
 class TagFileError(ValueError):
     """tagfile の形式・値が不正であることを表す。CLI は終了コード 2 で扱う。"""
@@ -106,14 +284,18 @@ class TagFileError(ValueError):
 # 文分割(決定論的)
 # ---------------------------------------------------------------------------
 
-def split_sentences(text: str) -> List[Dict]:
+def split_sentences(text: str, lang: str = "ja") -> List[Dict]:
     """決定論的な文単位分割。
 
     分割点 = 「。」「！」「？」および改行(\\n)の直後。
+    lang="en" の場合は "."(小数・次文字・省略形ガード通過時)・"!"・"?"・
+    改行の直後(_split_sentences_en を参照)。
     各文は {start, end, text}: [start, end) は入力文字列に対する 0 始まりの
     文字オフセット区間(終端子を含む)。text はその区間の生の文字列。
     空文(空白のみ)は除外する。終端子なしで終わる断片も 1 文とみなす。
     """
+    if lang == "en":
+        return _split_sentences_en(text)
     sentences: List[Dict] = []
     n = len(text)
     start = 0
@@ -139,22 +321,42 @@ def _append_sentence(sentences: List[Dict], text: str, start: int, end: int) -> 
 # 候補の全列挙(決定論的)
 # ---------------------------------------------------------------------------
 
-def enumerate_candidates(text: str, vocab: Tuple[str, ...]) -> List[Dict]:
+def enumerate_candidates(text: str, vocab: Tuple[str, ...], lang: str = "ja",
+                         exclusion_phrases: Optional[Tuple[str, ...]] = None,
+                         ) -> List[Dict]:
     """語彙語を含む文をすべて列挙する。
 
     - パターン照合は文ごとの str.find ループ(重複開始も +1 で捕捉・決定論的)
+    - lang="en" の場合は小文字化(長さ保存)した文に対する語境界一致。
+      除外フレーズの語境界一致区間と重なる出現は候補から除く。
+      さらに "?" で終わる文(疑問文)は監査対象外とする(案 3・承認済み)。
     - patterns は語彙宣言順の先頭出現位置でソートし、文内でユニーク化
     - 候補は文の start 昇順で seq = 1.. を付与
     - sentence_sha256 は前後の空白を strip した本文の UTF-8 SHA-256
     """
     candidates: List[Dict] = []
-    for sent in split_sentences(text):
+    for sent in split_sentences(text, lang):
+        if lang == "en":
+            if sent["text"].strip().endswith("?"):
+                continue
+            lowered = _ascii_lower(sent["text"])
+            phrases = (EXCLUSION_PHRASES_EN if exclusion_phrases is None
+                       else tuple(exclusion_phrases))
+            spans = _exclusion_spans(lowered, phrases)
         hits: List[Tuple[int, int, str]] = []
         for vi, pattern in enumerate(vocab):
-            pos = sent["text"].find(pattern)
-            while pos != -1:
-                hits.append((sent["start"] + pos, vi, pattern))
-                pos = sent["text"].find(pattern, pos + 1)
+            if lang == "en":
+                pattern_lower = _ascii_lower(pattern)
+                for pos in _find_boundary_hits(lowered, pattern_lower):
+                    # 除外判定は文内座標で行う(spans も文内座標)
+                    if _hits_excluded(pos, pos + len(pattern_lower), spans):
+                        continue
+                    hits.append((sent["start"] + pos, vi, pattern))
+            else:
+                pos = sent["text"].find(pattern)
+                while pos != -1:
+                    hits.append((sent["start"] + pos, vi, pattern))
+                    pos = sent["text"].find(pattern, pos + 1)
         if not hits:
             continue
         hits.sort(key=lambda h: (h[0], h[1]))
@@ -176,14 +378,24 @@ def enumerate_candidates(text: str, vocab: Tuple[str, ...]) -> List[Dict]:
 
 
 def find_modifier_patterns(sentence_text: str,
-                           modifier_vocab: Tuple[str, ...]) -> List[str]:
+                           modifier_vocab: Tuple[str, ...],
+                           lang: str = "ja") -> List[str]:
     """文内に出現する確信度マーカー(強意語)を語彙宣言順・重複なしで返す。
 
     - 判定は部分文字列照合のみ(決定論的)。否定・スコープ・真偽の解釈はしない
       (「エンジンは推測しない」の継承 — 共起は事実、解釈は Human の確認対象)。
     - 語彙が全称語彙と重なっていても処理可能(重複語は単独で共起を成立させる)。
+    - lang="en" の場合は語境界一致(小文字非依存・長さ保存の小文字化)。
     """
     found: List[str] = []
+    if lang == "en":
+        lowered = _ascii_lower(sentence_text)
+        for pattern in modifier_vocab:
+            pattern_lower = _ascii_lower(pattern)
+            if pattern_lower and _find_boundary_hits(lowered, pattern_lower) \
+                    and pattern not in found:
+                found.append(pattern)
+        return found
     for pattern in modifier_vocab:
         if pattern and pattern in sentence_text and pattern not in found:
             found.append(pattern)
@@ -291,6 +503,7 @@ def audit_documents(documents: Dict[str, str],
                     vocab: Optional[Tuple[str, ...]] = None,
                     tags: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
                     modifier_vocab: Optional[Tuple[str, ...]] = None,
+                    lang: str = "ja",
                     ) -> QuantifierAuditReport:
     """文書辞書(item_id -> text)を監査レーンに通す。
 
@@ -301,11 +514,22 @@ def audit_documents(documents: Dict[str, str],
     - modifier_vocab は確信度マーカー語彙(None 時は既定語彙・空 tuple で機能無効)。
       共起した候補には certainty_markers(語彙宣言順・重複なし)を注記する。
       注記は判定を変えない(LUT・タグ意味論は無変更)。
+    - lang は監査プロファイル(ja | en)を選ぶ(案 3・日英クロスリンガル)。
+      既定の ja は v1.3.1 と 1 バイトも変わらない(語彙・分分割・照合・理由文)。
+      en は語境界照合・除外フレーズ・疑問文除外つき。pattern_name と signal は
+      言語間で同一、reason のみ言語別。明示語彙ファイルが指定された場合、
+      語彙のみ上書きされ(言語の既定語彙は使われない)、分分割・照合・理由文は
+      lang に従う。
     """
-    patterns = DEFAULT_VOCAB if vocab is None else tuple(vocab)
+    if lang not in AUDIT_LANGS:
+        raise ValueError("unsupported audit lang: %r (valid: %s)"
+                         % (lang, ", ".join(AUDIT_LANGS)))
+    profile = LANG_DEFAULTS[lang]
+    patterns = profile["vocab"] if vocab is None else tuple(vocab)
     tag_map = {} if tags is None else tags
     vocab_sha = hashlib.sha256("\n".join(patterns).encode("utf-8")).hexdigest()
-    mod_patterns = DEFAULT_MODIFIER_VOCAB if modifier_vocab is None else tuple(modifier_vocab)
+    mod_patterns = (profile["modifier_vocab"] if modifier_vocab is None
+                    else tuple(modifier_vocab))
     modifier_vocab_sha = hashlib.sha256("\n".join(mod_patterns).encode("utf-8")).hexdigest()
 
     doc_receipts: List[Dict] = []
@@ -317,10 +541,11 @@ def audit_documents(documents: Dict[str, str],
 
     for item_id in sorted(documents.keys()):
         text = documents[item_id]
-        cands = enumerate_candidates(text, patterns)
+        cands = enumerate_candidates(text, patterns, lang)
         for cand in cands:
             cand["scope_hint"] = classify_scope_hint(cand["sentence_text"])
-            cand["certainty_markers"] = find_modifier_patterns(cand["sentence_text"], mod_patterns)
+            cand["certainty_markers"] = find_modifier_patterns(
+                cand["sentence_text"], mod_patterns, lang)
             key = cand["sentence_sha256"]
             tag = tag_map.get(key)
             if tag is not None:
@@ -334,6 +559,8 @@ def audit_documents(documents: Dict[str, str],
                 cand["scope"] = DEFAULT_SCOPE
                 cand["evidence"] = None
             signal, pattern_name, reason = AUDIT_LUT[(cand["backing"], cand["scope"])]
+            if lang == "en":
+                reason = AUDIT_LUT_REASONS_EN[(cand["backing"], cand["scope"])]
             cand["signal"] = signal.value
             cand["pattern_name"] = pattern_name
             cand["reason"] = reason
@@ -350,7 +577,7 @@ def audit_documents(documents: Dict[str, str],
         doc_receipts.append({
             "item_id": item_id,
             "char_count": len(text),
-            "sentence_count": len(split_sentences(text)),
+            "sentence_count": len(split_sentences(text, lang)),
             "candidates": [_public_candidate(c) for c in cands],
             "signal_counts": signal_counts,
             "unverified_remaining": doc_unverified,
@@ -360,6 +587,7 @@ def audit_documents(documents: Dict[str, str],
 
     unused_tags = [k for k in tag_map if k not in used_keys]
     receipt = {
+        "lang": lang,
         "vocab_sha256": vocab_sha,
         "vocab_count": len(patterns),
         "modifier_vocab_sha256": modifier_vocab_sha,
@@ -423,6 +651,8 @@ def format_audit_report(report: QuantifierAuditReport) -> str:
     receipt = report.receipt
     lines: List[str] = []
     lines.append("=== Quantifier Audit (量化子監査) ===")
+    if receipt.get("lang", "ja") != "ja":
+        lines.append("lang: %s" % receipt["lang"])
     lines.append("vocab: %d patterns, sha256: %s" % (receipt["vocab_count"], receipt["vocab_sha256"]))
     lines.append("modifiers: %d patterns, sha256: %s" % (
         receipt["modifier_vocab_count"], receipt["modifier_vocab_sha256"]))

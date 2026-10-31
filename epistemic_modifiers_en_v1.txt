@@ -1,0 +1,11 @@
+# 英語確信度マーカー語彙 v1（案 1 注記レーン・1 行 1 パターン）
+# 小文字で宣言する。照合は単語境界・大文字小文字を無視。
+clearly
+obviously
+undeniably
+undoubtedly
+certainly
+definitely
+inevitably
+necessarily
+absolutely

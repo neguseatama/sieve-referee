@@ -8,7 +8,10 @@ from .evaluator import batch_evaluate
 from .models import EvaluationResult, SignalColor
 from .quantifier_audit import (
     DEFAULT_MODIFIER_VOCAB,
+    DEFAULT_MODIFIER_VOCAB_EN,
     DEFAULT_VOCAB,
+    DEFAULT_VOCAB_EN,
+    EXCLUSION_PHRASES_EN,
     QuantifierAuditReport,
     audit_documents,
     load_tags_file,
@@ -24,6 +27,9 @@ __all__ = [
     "SignalColor",
     "DEFAULT_VOCAB",
     "DEFAULT_MODIFIER_VOCAB",
+    "DEFAULT_VOCAB_EN",
+    "DEFAULT_MODIFIER_VOCAB_EN",
+    "EXCLUSION_PHRASES_EN",
     "QuantifierAuditReport",
     "audit_documents",
     "load_tags_file",

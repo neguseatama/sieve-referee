@@ -1,0 +1,17 @@
+# 英語既定語彙 v1（1 行 1 パターン・# コメント・空行スキップ）
+# 小文字で宣言する。照合は単語境界・大文字小文字を無視。
+# 時間絶対語（always/never/invariably/permanently）は初版に含めない。
+# ja v1 の「常に」系との一括整理は様相・時間スコープ拡張（#1）着手時に行う。
+all
+every
+everyone
+everybody
+everything
+each
+any
+none
+neither
+both
+no
+must
+without exception
