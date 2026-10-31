@@ -31,6 +31,20 @@ def result_to_dict(res: EvaluationResult) -> dict:
     }
 
 
+def resolve_audit_lang(documents: dict, lang: str) -> str:
+    """--lang の解決。auto は全文書のかな文字(ひらがな+カタカナ)比率による
+
+    決定論的判定(比率 >= 0.05 なら ja、それ以外は en)。依存ゼロ。
+    """
+    if lang != "auto":
+        return lang
+    total = sum(len(t) for t in documents.values())
+    if total == 0:
+        return "en"
+    kana = sum(1 for text in documents.values() for ch in text if "ぁ" <= ch <= "ヿ")
+    return "ja" if kana / total >= 0.05 else "en"
+
+
 def main():
     parser = argparse.ArgumentParser(description="sieve_referee: Deterministic Text Plagiarism Screening Engine")
     parser.add_argument("target_dir", type=str, help="Target directory containing .txt files")
@@ -48,6 +62,8 @@ def main():
                         help="確信度マーカー語彙ファイル(案 1 注記レーン・1 行 1 パターン)。未指定時は既定語彙 v1")
     parser.add_argument("--audit-tags", type=str, default=None,
                         help="裏づけタグファイル(JSON: sentence_sha256 -> backing/scope)")
+    parser.add_argument("--lang", type=str, default="ja", choices=("ja", "en", "auto"),
+                        help="監査レーンの言語プロファイル(ja | en | auto)。既定は ja。")
     parser.add_argument("--fail-on-unverified", action="store_true",
                         help="監査 RED(裏づけのない全称文)が 1 件でもあれば終了コード 1")
     args = parser.parse_args()
@@ -84,7 +100,9 @@ def main():
         except (TagFileError, FileNotFoundError) as e:
             print("Error: %s" % e, file=sys.stderr)
             sys.exit(2)
-        audit_report = audit_documents(doc_dict, vocab=vocab, tags=tags, modifier_vocab=modifiers)
+        audit_lang = resolve_audit_lang(doc_dict, args.lang)
+        audit_report = audit_documents(doc_dict, vocab=vocab, tags=tags,
+                                       modifier_vocab=modifiers, lang=audit_lang)
 
     if args.json:
         if audit_enabled:
