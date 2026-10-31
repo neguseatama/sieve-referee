@@ -3,7 +3,8 @@
 決定(2026-10-31・ユーザー承認):
   - --lang {ja, en, auto}。既定 ja は v1.3.1 と 1 バイトも変わらない
   - en は単語境界照合・除外フレーズ・疑問文除外つき。語は小文字宣言
-  - 時間絶対語(always/never 等)は en 初版に含めない(#1 着手時に一括整理)
+  - 時間絶対語: v1.4.0 で「#1 着手時に一括整理」とし、#1(v1.5.0・2026-11-01 承認)
+    で決着 — always/never/permanently は恒久不採用、低リスク子集 4 語のみ追加
   - pattern_name と signal は言語間で同一。reason のみ言語別
   - 対訳コーパス: 等価な全称主張は両言語で同一シグナル(A セクション)。
     B/C/D セクションは en 側ガードによる設計された非対称を機械固定する
@@ -36,8 +37,8 @@ from sieve_referee.quantifier_audit import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-EXPECTED_EN_VOCAB_SHA256 = "66c80f9b84af91ccf23bd9e3f192a229cd787bce8ebbeff3238fcdc6d19e7ac3"
-EXPECTED_EN_MODIFIER_SHA256 = "160446d8bcadf40452f848652aa8b7d1649af801180510a5b6f2fe8127503ed8"
+EXPECTED_EN_VOCAB_SHA256 = "d6a1141b3058dd3905fc4aeff94930cb2983a83864afc917486bb85b5af08856"
+EXPECTED_EN_MODIFIER_SHA256 = "3657afc8f99f579c0c8ee239e62b71468ae77966cbc3c952277a118a9e2e34dc"
 EXPECTED_EXCLUSION_SHA256 = "b2d99729142e9e7dbf47461b3b8abc45e4988ef827e9217c0370ed2456a485de"
 
 
@@ -136,16 +137,28 @@ SECTION_E = [
 
 
 class TestEnVocabPins(unittest.TestCase):
-    def test_en_vocab_is_13_patterns(self):
-        self.assertEqual(len(DEFAULT_VOCAB_EN), 13)
+    def test_en_vocab_is_17_patterns(self):
+        """v1.4.0 の 13 語 + v1.5.0(#1) 低リスク時間絶対語 4 語。"""
+        self.assertEqual(len(DEFAULT_VOCAB_EN), 17)
+
+    def test_en_vocab_v150_temporal_lowrisk_subset_present(self):
+        for w in ("invariably", "without fail", "around the clock", "24/7"):
+            self.assertIn(w, DEFAULT_VOCAB_EN)
+
+    def test_en_vocab_v150_temporal_exclusions_still_absent(self):
+        """#1 で恒久不採用と決着した時間絶対語(非主張用法・慣用衝突)。"""
+        for w in ("always", "never", "permanently", "forever",
+                  "at all times", "every time"):
+            self.assertNotIn(w, DEFAULT_VOCAB_EN)
 
     def test_en_vocab_sha256_pin(self):
         canonical = "\n".join(DEFAULT_VOCAB_EN)
         self.assertEqual(hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
                          EXPECTED_EN_VOCAB_SHA256)
 
-    def test_en_modifier_vocab_is_9_patterns(self):
-        self.assertEqual(len(DEFAULT_MODIFIER_VOCAB_EN), 9)
+    def test_en_modifier_vocab_is_17_patterns(self):
+        """v1.4.0 の 9 語 + v1.5.0(#1) 認識的必然 8 語(注記専用・判定不変)。"""
+        self.assertEqual(len(DEFAULT_MODIFIER_VOCAB_EN), 17)
 
     def test_en_modifier_vocab_sha256_pin(self):
         canonical = "\n".join(DEFAULT_MODIFIER_VOCAB_EN)
@@ -173,9 +186,17 @@ class TestEnVocabPins(unittest.TestCase):
             load_vocab_file(str(REPO_ROOT / "epistemic_modifiers_en_v1.txt")),
             DEFAULT_MODIFIER_VOCAB_EN)
 
-    def test_ja_defaults_untouched(self):
-        self.assertEqual(len(DEFAULT_VOCAB), 18)
-        self.assertEqual(len(DEFAULT_MODIFIER_VOCAB), 10)
+    def test_ja_v150_defaults(self):
+        """v1.4.0 では ja 無変更(18/10)を pin したが、#1 で低リスク子集を追加し
+        21/17 に(ユーザー承認 2026-11-01)。既存 18 語自体は 1 語も変わらない。"""
+        self.assertEqual(len(DEFAULT_VOCAB), 21)
+        self.assertEqual(len(DEFAULT_MODIFIER_VOCAB), 17)
+        # v1.4.0 当時の語は順番ごと保持されている
+        self.assertEqual(DEFAULT_VOCAB[:18], (
+            "すべて", "全て", "必ず", "かならず", "常に", "つねに",
+            "決して", "けっして", "任意の", "どの", "いかなる",
+            "一度も", "一回も", "どこにも", "どちらも", "どれも",
+            "永遠に", "絶対に"))
 
 
 class TestEnSentenceSplitting(unittest.TestCase):

@@ -1,5 +1,11 @@
 # 英語確信度マーカー語彙 v1（案 1 注記レーン・1 行 1 パターン）
 # 小文字で宣言する。照合は単語境界・大文字小文字を無視。
+# v1.5.0（#1・様相・時間スコープ拡張）: 認識的必然の標識 8 語を追加（注記専用・判定不変）。
+#   unquestionably / indisputably / beyond doubt / by definition /
+#   self-evidently / manifestly / as everyone knows / it goes without saying
+#   ja 側と同数（17/17）でカバレッジを並行させる。
+#   "by design" / "structurally" 等の構造必然表現は不採用（「構造上」と同一判断）。
+#   注記レーンに除外機構は無いため "not necessarily" は誤注記になる — 既知制限。
 clearly
 obviously
 undeniably
@@ -9,3 +15,11 @@ definitely
 inevitably
 necessarily
 absolutely
+unquestionably
+indisputably
+beyond doubt
+by definition
+self-evidently
+manifestly
+as everyone knows
+it goes without saying

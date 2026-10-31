@@ -1,7 +1,13 @@
 # 英語既定語彙 v1（1 行 1 パターン・# コメント・空行スキップ）
 # 小文字で宣言する。照合は単語境界・大文字小文字を無視。
-# 時間絶対語（always/never/invariably/permanently）は初版に含めない。
-# ja v1 の「常に」系との一括整理は様相・時間スコープ拡張（#1）着手時に行う。
+# 時間絶対語のうち always/never/permanently は恒久不採用
+# （「not always」「never mind」「as always」等の非主張用法が体系的に多いため。
+#   v1.4.0 で #1 着手時に一括整理とし、#1 で決着 — 2026-11-01）。
+# forever も慣用衝突（nothing lasts forever 等）により不採用。
+# at all times / every time は既存 all / every が単語境界で捕捉済みのため重複登録しない。
+# v1.5.0（#1・様相・時間スコープ拡張）: 低リスク時間絶対語 4 語を追加。
+#   invariably / without fail / around the clock / 24/7
+#   24/7 は日付表記（24/7/2025 等）との衝突が残る — 既知制限（recall 重視）。
 all
 every
 everyone
@@ -15,3 +21,7 @@ both
 no
 must
 without exception
+invariably
+without fail
+around the clock
+24/7

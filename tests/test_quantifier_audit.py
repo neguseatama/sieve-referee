@@ -39,7 +39,7 @@ from sieve_referee.quantifier_audit import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-EXPECTED_VOCAB_SHA256 = "3ce35bb2c33485bdacf11c850449b34ee1e2db12c5fd615715d6adf28045074c"
+EXPECTED_VOCAB_SHA256 = "77d1258ed86a30de952ee9f43cc3bdab0e8f13870f435308b9782c514a8442c1"
 
 # 実事故 fixture(連載・フェルマーテスト記事 F6 の修正前/修正後の一文)
 F6_ORIGINAL = "排除は一撃で確定し、肯定は永遠に非確定だ。"
@@ -50,8 +50,9 @@ F6_FIXED = (
 
 
 class TestDefaultVocabPins(unittest.TestCase):
-    def test_vocab_is_18_patterns(self):
-        self.assertEqual(len(DEFAULT_VOCAB), 18)
+    def test_vocab_is_21_patterns(self):
+        """v1.3.0 の 18 語 + v1.5.0(#1) 低リスク時間絶対語 3 語。"""
+        self.assertEqual(len(DEFAULT_VOCAB), 21)
 
     def test_vocab_sha256_pin(self):
         canonical = "\n".join(DEFAULT_VOCAB)
@@ -66,6 +67,17 @@ class TestDefaultVocabPins(unittest.TestCase):
     def test_vocab_excludes_partial_negation_marker(self):
         """必ずしも〜ない は部分否定(全称の否定)なので語彙に含めない。"""
         self.assertNotIn("必ずしも", DEFAULT_VOCAB)
+
+    def test_vocab_v150_temporal_lowrisk_subset_present(self):
+        """#1: 時間絶対語の低リスク子集が入っている。"""
+        for w in ("絶えず", "四六時中", "24時間365日"):
+            self.assertIn(w, DEFAULT_VOCAB)
+
+    def test_vocab_v150_exclusions_absent(self):
+        """#1: リスク予測で不採用とした語が入っていない(常時=非常時衝突・
+        24時間=期限用法・必ずしも=部分否定)。"""
+        for w in ("常時", "24時間", "全く", "疑問の余地", "必然", "不可避"):
+            self.assertNotIn(w, DEFAULT_VOCAB)
 
     def test_load_vocab_file_matches_embedded(self):
         with tempfile.TemporaryDirectory() as td:
@@ -284,7 +296,7 @@ class TestAuditDocuments(unittest.TestCase):
     def test_vocab_sha256_recorded(self):
         receipt = audit_documents({"doc.txt": F6_ORIGINAL}).receipt
         self.assertEqual(receipt["vocab_sha256"], EXPECTED_VOCAB_SHA256)
-        self.assertEqual(receipt["vocab_count"], 18)
+        self.assertEqual(receipt["vocab_count"], 21)
 
     def test_worksheet_carries_sentence_text_for_human(self):
         report = audit_documents({"doc.txt": F6_ORIGINAL})
@@ -429,18 +441,20 @@ class TestZeroDependencyStaticScan(unittest.TestCase):
 # 案 1: 認識的確信度マーカー注記レーン(v1.3.0 追加・ユーザー提案 2026-10-26)
 # 設計境界(本テスト群が機械固定する):
 #   - 注記(メタフラグ)のみで判定を変えない(8 状態 LUT・tagfile 意味論は無変更)
-#   - 既定マーカー語彙 v1 は 10 パターン・sha256 pin・既定全称語彙と素集合
+#   - 既定マーカー語彙は 17 パターン(v1.3.0 の 10 語 + v1.5.0(#1) 認識的必然 7 語)
+#     ・sha256 pin・既定全称語彙と素集合
 #   - マーカーのみの文は候補にならない(共起は全称候補への注記としてだけ存在する)
 # ---------------------------------------------------------------------------
 
-EXPECTED_MODIFIER_VOCAB_SHA256 = "88439481bebc05635aa16887e6dc23651b05cf915104bb712775d9b3466d47c8"
+EXPECTED_MODIFIER_VOCAB_SHA256 = "4215c12b85105f8acfe00ed5d3a95ceebf232cca55b9f2fcc05b5b9da4301431"
 
 MARKER_HIT = "確実にすべての素数は奇数である。"
 
 
 class TestCertaintyMarkerVocab(unittest.TestCase):
-    def test_default_modifier_vocab_is_10_patterns(self):
-        self.assertEqual(len(DEFAULT_MODIFIER_VOCAB), 10)
+    def test_default_modifier_vocab_is_17_patterns(self):
+        """v1.3.0 の 10 語 + v1.5.0(#1) 認識的必然 7 語(注記専用・判定不変)。"""
+        self.assertEqual(len(DEFAULT_MODIFIER_VOCAB), 17)
 
     def test_modifier_vocab_sha256_pin(self):
         canonical = "\n".join(DEFAULT_MODIFIER_VOCAB)
@@ -524,7 +538,7 @@ class TestCertaintyAnnotation(unittest.TestCase):
 
     def test_receipt_records_modifier_vocab_sha256_and_count(self):
         receipt = audit_documents({"doc.txt": MARKER_HIT}).receipt
-        self.assertEqual(receipt["modifier_vocab_count"], 10)
+        self.assertEqual(receipt["modifier_vocab_count"], 17)
         self.assertEqual(receipt["modifier_vocab_sha256"], EXPECTED_MODIFIER_VOCAB_SHA256)
 
     def test_receipt_certainty_flagged_totals(self):

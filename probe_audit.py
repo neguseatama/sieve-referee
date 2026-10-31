@@ -140,9 +140,9 @@ solo = audit_documents({"m.txt": "これは確実に動く。"})
 check("P7 modifier-only sentence is not a candidate",
       len(solo.receipt["documents"][0]["candidates"]) == 0)
 check("P7 default modifier vocab pin",
-      len(DEFAULT_MODIFIER_VOCAB) == 10
+      len(DEFAULT_MODIFIER_VOCAB) == 17
       and hashlib.sha256("\n".join(DEFAULT_MODIFIER_VOCAB).encode("utf-8")).hexdigest()
-      == "88439481bebc05635aa16887e6dc23651b05cf915104bb712775d9b3466d47c8")
+      == "4215c12b85105f8acfe00ed5d3a95ceebf232cca55b9f2fcc05b5b9da4301431")
 
 # --- Human worksheet の見本(先頭 12 行) ----------------------------------------
 print("\n--- worksheet sample (draft_a.txt, untagged) ---")
