@@ -135,6 +135,83 @@ SECTION_E = [
      "明白に", "obviously"),
 ]
 
+# ---------------------------------------------------------------------------
+# #1(v1.5.0・2026-11-01 承認): 様相・時間スコープ拡張のコーパス(F/G/H・24 ケース)
+# 構成比の根拠: 新增語の最大リスクは極性衝突・表記衝突(H 区分)なので、
+# 誤検出リスク区間として 1/3 を確保(v1.4.0 と同じリスク重み付け方式)。
+# ---------------------------------------------------------------------------
+
+# F セクション: 時間絶対語の低リスク子集。等価な時間絶対主張は
+# 両言語で 1 候補・RED(シグナル一致が等価性の基準)。F4 の ja 側は
+# 対訳等価のために既存語「必ず」を使う(without fail = 毎回必ず)。
+SECTION_F = [
+    ("このシステムは四六時中監視されている。",
+     "The system is monitored around the clock."),
+    ("24時間365日稼働している。",
+     "It runs 24/7."),
+    ("監視ログは絶えず書き込まれる。",
+     "Monitoring logs are invariably written."),
+    ("毎回必ずバックアップを検証する。",
+     "We verify the backup without fail."),
+    ("カスタマーサポートは四六時中対応する。",
+     "Customer support answers around the clock."),
+    ("この回線は24時間365日利用できる。",
+     "This line is available 24/7."),
+    ("請求データは絶えず検証される。",
+     "Billing data is invariably validated."),
+    ("異常検知は絶えず走っている。",
+     "Anomaly detection is invariably running."),
+]
+
+# G セクション: 認識的必然の新マーカー。共起は注記のみで判定は RED のまま
+# (注記が判定を変えないことの再 pin)。対は意味的に並行(語彙対応は ja/en で
+# 独立 — 対訳等価そのものの pin は A/E が担当)。G8 の ja 側は v1.3.0 の
+# 既存マーカー「明白に」(新 en マーカー by definition のカバレッジ)。
+SECTION_G = [
+    ("疑いようがない、全ての要件を満たす。",
+     "Beyond doubt, it meets every requirement.",
+     "疑いようがない", "beyond doubt"),
+    ("言うまでもなく、どの部署も対象になる。",
+     "It goes without saying that every team is covered.",
+     "言うまでもなく", "it goes without saying"),
+    ("必然的に、どのノードも再起動が必要になる。",
+     "Unquestionably, every node will need a restart.",
+     "必然的に", "unquestionably"),
+    ("不可避的に、全てのセッションが切断される。",
+     "Indisputably, all sessions are terminated.",
+     "不可避的に", "indisputably"),
+    ("環境を変えれば、結果はおのずと全て変わる。",
+     "Self-evidently, every result changes with the environment.",
+     "おのずと", "self-evidently"),
+    ("この法則は自ずとどの層にも波及する。",
+     "Manifestly, every layer inherits the rule.",
+     "自ずと", "manifestly"),
+    ("すべての支社がこの請求方法の標準であることは疑いようもない。",
+     "As everyone knows, the billing rules apply to all invoices.",
+     "疑いようもない", "as everyone knows"),
+    ("定義により明白に、すべての入力で真を返す。",
+     "By definition, this function returns true for every input.",
+     "明白に", "by definition"),
+]
+
+# H セクション: 不採用語のトリップワイヤ。リスク予測で不採用にした語が
+# 将来語彙に立った場合に本テストが壊れる(意図的な安全装置)。
+JA_H_NEGATIVE = [
+    "非常時の連絡網を確認する。",     # 常時(不採用): 非常時との部分文字列衝突
+    "24時間以内に回答すること。",     # 24時間(不採用): 期限用法
+]
+# 副詞形限定・極性ガード: 否定形では注記しない(1 候補・マーカー空・RED のまま)
+JA_H_ANNOTATION_GUARD = [
+    ("この結果は必然ではないが、すべての環境で再現する。", []),
+    ("疑問の余地があるが、すべての項目は確認済みである。", []),
+]
+EN_H_NEGATIVE = [
+    "Nothing lasts forever.",        # forever(不採用): 慣用衝突
+    "It does not always sync.",      # always(不採用): 非主張用法
+    "Never mind the retry logic.",   # never(不採用): 非主張用法
+    "Files are permanently deleted after 30 days.",  # permanently(不採用)
+]
+
 
 class TestEnVocabPins(unittest.TestCase):
     def test_en_vocab_is_17_patterns(self):
@@ -478,6 +555,87 @@ class TestParallelCorpus(unittest.TestCase):
         self.assertEqual(len(SECTION_E), 6)
         self.assertGreater(len(SECTION_B) + len(SECTION_C) + len(SECTION_D),
                            len(SECTION_A) + len(SECTION_E))
+
+
+class TestModalTemporalCorpus(unittest.TestCase):
+    """#1(v1.5.0・2026-11-01 承認): 様相・時間スコープ拡張のコーパス pin。
+
+    F: 時間絶対語の低リスク子集 — 両言語で 1 候補・RED
+    G: 認識的必然の新マーカー — 注記のみで判定不変(定理タグで GREEN に戻る)
+    H: 不採用語のトリップワイヤ — 語彙に立ったら壊れる(意図的な安全装置)
+    """
+
+    def _audit_one(self, text, lang, tags=None):
+        return audit_documents({"t.txt": text}, lang=lang, tags=tags)
+
+    def _candidates(self, text, lang):
+        return self._audit_one(text, lang).receipt["documents"][0]["candidates"]
+
+    def test_section_f_temporal_equivalents_flag_in_both_languages(self):
+        for ja, en in SECTION_F:
+            ja_cands = self._candidates(ja, "ja")
+            en_cands = self._candidates(en, "en")
+            self.assertEqual(len(ja_cands), 1, msg=ja)
+            self.assertEqual(len(en_cands), 1, msg=en)
+            self.assertEqual(ja_cands[0]["signal"], "RED", msg=ja)
+            self.assertEqual(en_cands[0]["signal"], "RED", msg=en)
+
+    def test_section_f_new_patterns_actually_match(self):
+        # 新語そのものが照合に使われていること(旧語による代替検出の排除)。
+        # ja 期待値: F1-F8 の順。en 期待値も同順。
+        ja_expected = ["四六時中", "24時間365日", "絶えず", "必ず",
+                       "四六時中", "24時間365日", "絶えず", "絶えず"]
+        for (ja, _en), pattern in zip(SECTION_F, ja_expected):
+            cands = self._candidates(ja, "ja")
+            self.assertIn(pattern, cands[0]["patterns"], msg=ja)
+        en_expected = ["around the clock", "24/7", "invariably", "without fail",
+                       "around the clock", "24/7", "invariably", "invariably"]
+        for (_ja, en), pattern in zip(SECTION_F, en_expected):
+            cands = self._candidates(en, "en")
+            self.assertIn(pattern, cands[0]["patterns"], msg=en)
+
+    def test_section_g_new_markers_annotated_without_signal_change(self):
+        for ja, en, ja_marker, en_marker in SECTION_G:
+            ja_cand = self._candidates(ja, "ja")[0]
+            en_cand = self._candidates(en, "en")[0]
+            self.assertEqual(ja_cand["signal"], "RED", msg=ja)
+            self.assertEqual(en_cand["signal"], "RED", msg=en)
+            self.assertEqual(ja_cand["certainty_markers"], [ja_marker], msg=ja)
+            self.assertEqual(en_cand["certainty_markers"], [en_marker], msg=en)
+            # 注記は判定を変えない: 定理タグ適用後も LUT 意味論どおり GREEN
+            rep = self._audit_one(ja, "ja", tags={_sha(ja): "theorem"})
+            self.assertEqual(
+                rep.receipt["documents"][0]["candidates"][0]["signal"],
+                "GREEN", msg=ja)
+
+    def test_section_h_rejected_words_absent_ja(self):
+        for text in JA_H_NEGATIVE:
+            self.assertEqual(self._candidates(text, "ja"), [], msg=text)
+
+    def test_section_h_rejected_words_absent_en(self):
+        for text in EN_H_NEGATIVE:
+            self.assertEqual(self._candidates(text, "en"), [], msg=text)
+
+    def test_section_h_polarity_guards(self):
+        """副詞形限定の証明: 「必然ではない」は注記せず、「疑問の余地がある」も
+        注記しない(極性が反転する表現の誤注記防止)。候補自体は 1 件・RED のまま。"""
+        for text, expected in JA_H_ANNOTATION_GUARD:
+            cands = self._candidates(text, "ja")
+            self.assertEqual(len(cands), 1, msg=text)
+            self.assertEqual(cands[0]["certainty_markers"], expected, msg=text)
+            self.assertEqual(cands[0]["signal"], "RED", msg=text)
+
+    def test_corpus_size_is_pinned(self):
+        # v1.4.0 の 50 ケース + #1 の 24 ケース = 74
+        self.assertEqual(len(SECTION_F), 8)
+        self.assertEqual(len(SECTION_G), 8)
+        self.assertEqual(
+            len(JA_H_NEGATIVE) + len(JA_H_ANNOTATION_GUARD) + len(EN_H_NEGATIVE), 8)
+        total = (len(SECTION_A) + len(SECTION_B) + len(SECTION_C)
+                 + len(SECTION_D) + len(SECTION_E) + len(SECTION_F)
+                 + len(SECTION_G) + len(JA_H_NEGATIVE)
+                 + len(JA_H_ANNOTATION_GUARD) + len(EN_H_NEGATIVE))
+        self.assertEqual(total, 74)
 
 
 class TestCliLangSelection(unittest.TestCase):
