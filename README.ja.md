@@ -173,8 +173,8 @@ sieve-referee ./target_documents -j 4
 
 **パイプライン（全段階が決定論的）:**
 
-1. 文分割（。「！？」+ 改行）
-2. 全称量化語彙の全列挙（18 パターン・recall 重視）
+1. 文分割（`ja`: 。「！」「？」+ 改行 / `en`: 小数・次文字・省略形ガードつきの `.` + `!` `?` 改行）
+2. 全称量化語彙の全列挙（`ja`: 18 パターン・recall 重視 / `en`: 13 パターン・小文字宣言・単語境界照合）
 3. `sentence_sha256` による指紋化（tagfile の鍵）
 4. Human tagfile（`backing` / `scope`）— エンジンは推測しない
 5. 8 状態監査 LUT + `--fail-on-unverified` CI ゲート
@@ -192,6 +192,24 @@ sieve-referee ./target_documents -j 4
 
 **v1.3.0 で追加 — 確信度マーカー:** 全称語彙と認識的強意語（「確実に」「明白に」等）の同一文内での共起は、`certainty_markers` としてワークシートに注記されます。注記は判定を一切変更しません。GREEN/YELLOW/RED を決めるのはタグのみです。
 
+**v1.4.0 で追加 — 英語プロファイル（`--lang`）:** 監査レーンに英語専用プロファイルが加わりました。`--lang {ja,en,auto}` が語彙・文分割・照合・理由文を 1 セットで切り替えます（既定 `ja` は v1.3.1 と 1 バイトも変わりません）:
+
+- **`en` 語彙（13 パターン・小文字宣言）:** all / every / everyone / everybody / everything / each / any / none / neither / both / no / must / without exception。時間絶対語（always / never / invariably / permanently）は、日本語側と同じ誤検出リスクの理由で初版には含めず、様相・時間スコープ拡張（#1）着手時に ja/en の一括整理を行います。
+- **単語境界照合**（大文字小文字を無視・長さ保存の小文字化）: all は *ballot / allow / small / alloy* の内部に一致しなくなり、no は *notify / nobody* の内部に、every は *everywhere* の内部に一致しません。
+- **除外フレーズ（34・決定論的）:** 語境界一致した除外フレーズ（*not all, at all, after all, all but, all rights, each other, every now and then, if any, no longer, no doubt, no.* 等）と重なる出現だけが除外され、文自体は対象に残ります。`All rights are reserved.` は候補にならず、`All nodes must sync.` は候補になります。
+- **疑問文除外:** `?` で終わる文は `en` では監査対象外です（疑問は全称主張ではない）。日本語の `？` 終端文は従来どおり候補になります（変更なし）。
+- **理由文:** 監査レーンの `reason` は英語テーブル（`AUDIT_LUT_REASONS_EN`）を持ち、8 状態・シグナル・`pattern_name` は日本語 LUT と完全に同一です。
+- **`auto`**: 読み込んだ全文書のかな文字（ひらがな+カタカナ）比率による決定論的判定（比率 ≥ 0.05 なら `ja`、それ以外 `en`）。CI では `--lang` の明示指定を推奨（`auto` は利便性用）。
+- 日英 54 ケースの対訳コーパス（等価全称・除外フレーズ罠・単語境界罠・疑問文・強意語共起・裏づけつきペア）が `tests/test_quantifier_audit_en.py` に cross-lingual 動作を機械固定しています。
+
+```bash
+# 英語の下書きディレクトリを監査
+sieve-referee ./draft_en --audit --lang en --fail-on-unverified
+
+# 文書群自身から言語を決定論的に判定
+sieve-referee ./mixed_dir --audit --lang auto
+```
+
 **監査レーンの CLI オプション:**
 
 | オプション | 説明 |
@@ -200,6 +218,7 @@ sieve-referee ./target_documents -j 4
 | `--audit-vocab PATH` | 全称語彙ファイル（未指定: 内蔵 18 パターン） |
 | `--audit-tags PATH` | tagfile（JSON・`sentence_sha256` を鍵） |
 | `--audit-modifier-vocab PATH` | 強意語彙ファイル（v1.3.0） |
+| `--lang ja\|en\|auto` | 監査レーンの言語プロファイル（v1.4.0・既定 `ja`） |
 | `--fail-on-unverified` | 裏付けのない全称（RED）が 1 件でも残れば終了コード `1` |
 
 ```bash
@@ -210,7 +229,7 @@ sieve-referee ./draft_dir --audit --fail-on-unverified
 sieve-referee ./draft_dir --audit --audit-tags tags.json --fail-on-unverified
 ```
 
-既知の限界: 語彙にない全称表現は拾えません（偽陰性クラス）。タグ自体の真偽は検証者の責任です（tagfile の `evidence` フィールドに出所を記録）。
+既知の限界: 語彙にない全称表現は拾えません（偽陰性クラス）。タグ自体の真偽は検証者の責任です（tagfile の `evidence` フィールドに出所を記録）。英語固有の限界: `en` 語彙は表層一致・小文字宣言のため、*anybody / nobody* のような形態変化形は列挙しておらず取りこぼします。省略形ガードは固定リストのため万能ではありません。除外フレーズは経験的なリストであり、文法から導出されるのではなく対訳コーパスで固定・拡張されます。
 
 ---
 

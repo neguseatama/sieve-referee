@@ -173,8 +173,8 @@ The engine **never evaluates truth values**; it only checks whether the author a
 
 **Pipeline (every stage deterministic):**
 
-1. Sentence segmentation (。`！` `？` + newline)
-2. Exhaustive enumeration of universal-quantifier vocabulary (18 patterns, recall-first)
+1. Sentence segmentation (`ja`: 。`！` `？` + newline / `en`: `.` with decimal, next-char and abbreviation guards + `!` `?` newline)
+2. Exhaustive enumeration of universal-quantifier vocabulary (`ja`: 18 patterns, recall-first / `en`: 13 lowercase patterns matched at word boundaries)
 3. `sentence_sha256` fingerprinting (the tagfile key)
 4. Human tagfile (`backing` / `scope`) — the engine never guesses
 5. 8-state audit LUT + `--fail-on-unverified` CI gate
@@ -192,6 +192,24 @@ First-order validity over unrestricted domains (`⊨`) is undecidable (Church's 
 
 **Added in v1.3.0 — certainty markers:** co-occurrence of a universal quantifier with an epistemic intensifier (e.g. 「確実に」 "certainly", 「明白に」 "evidently") in the same sentence is annotated as `certainty_markers` on the human worksheet. Annotations never alter signals — GREEN/YELLOW/RED is decided solely by tags.
 
+**Added in v1.4.0 — English profile (`--lang`):** the audit lane now runs a dedicated English profile. `--lang {ja,en,auto}` selects the vocabulary, sentence splitting, matching and reason strings as one unit (default `ja` keeps v1.3.1 behavior byte-identical):
+
+- **`en` vocabulary (13 lowercase patterns):** all / every / everyone / everybody / everything / each / any / none / neither / both / no / must / without exception. Temporal absolutes (`always`, `never`, `invariably`, `permanently`) are deliberately excluded from the first English vocabulary for the same false-positive reason as on the Japanese side; the unified ja/en cleanup is deferred to the modal/temporal scope extension.
+- **Word-boundary matching** (case-insensitive, length-preserving lowering): `all` no longer matches inside *ballot / allow / small / alloy*; `no` not inside *notify / nobody*; `every` not inside *everywhere*.
+- **Exclusion phrases (34, deterministic):** an occurrence overlapping a boundary-aligned phrase — *not all, at all, after all, all but, all rights, each other, every now and then, if any, no longer, no doubt, no., ...* — is dropped per occurrence; the sentence itself stays in scope. `All rights are reserved.` produces no candidate, while `All nodes must sync.` does.
+- **Interrogative exclusion:** sentences ending with `?` are out of audit scope for `en` (any questions are not universal claims). Japanese `？` sentences remain candidates, exactly as before.
+- **Reason strings:** the audit lane's `reason` field has a full English table (`AUDIT_LUT_REASONS_EN`) with the same 8 states, signals and `pattern_name` values as the Japanese LUT.
+- **`auto`** resolves deterministically by the kana (hiragana + katakana) ratio over all loaded documents: ratio ≥ 0.05 → `ja`, else `en`. CI runs should pass `--lang` explicitly; `auto` is a convenience.
+- A 54-case ja↔en parallel corpus (equivalent universals, exclusion traps, boundary traps, interrogatives, intensifier co-occurrence, backed pairs) pins the cross-lingual behavior in `tests/test_quantifier_audit_en.py`.
+
+```bash
+# Audit an English draft directory
+sieve-referee ./draft_en --audit --lang en --fail-on-unverified
+
+# Language resolved deterministically from the documents themselves
+sieve-referee ./mixed_dir --audit --lang auto
+```
+
 **Audit lane CLI options:**
 
 | Option | Description |
@@ -200,6 +218,7 @@ First-order validity over unrestricted domains (`⊨`) is undecidable (Church's 
 | `--audit-vocab PATH` | Quantifier vocabulary file (default: built-in 18 patterns) |
 | `--audit-tags PATH` | Tagfile (JSON) keyed by `sentence_sha256` |
 | `--audit-modifier-vocab PATH` | Intensifier vocabulary file (v1.3.0) |
+| `--lang ja\|en\|auto` | Audit language profile (v1.4.0; default `ja`) |
 | `--fail-on-unverified` | Exit code `1` if any unbacked universal (RED) remains |
 
 ```bash
@@ -210,7 +229,7 @@ sieve-referee ./draft_dir --audit --fail-on-unverified
 sieve-referee ./draft_dir --audit --audit-tags tags.json --fail-on-unverified
 ```
 
-Known limits: universal phrasings outside the vocabulary are missed (false-negative class); the truth of the tags themselves is the verifier's responsibility (recorded in the tagfile's `evidence` field).
+Known limits: universal phrasings outside the vocabulary are missed (false-negative class); the truth of the tags themselves is the verifier's responsibility (recorded in the tagfile's `evidence` field). English-specific: the `en` vocabulary is surface-literal and lowercase-declared (morphological variants such as *anybody/nobody* are not enumerated and are missed); the fixed abbreviation guard list cannot cover every abbreviation; and the exclusion phrase list is empirical — it is pinned and extended through the parallel corpus, not derived from a grammar.
 
 ---
 
@@ -237,10 +256,7 @@ Japanese. If you use this on non-Japanese corpora, re-run the false-positive
 check described in [ARCHITECTURE.md](docs/ARCHITECTURE.md) against your own
 data before trusting the default thresholds.
 
-Additionally, the `reason` string returned by every `EvaluationResult` is
-currently hard-coded in Japanese regardless of the input document's
-language, as shown in the example output above. There is no English (or
-other-language) localization of these messages yet.
+Additionally, the `reason` string of the **pair-evaluation lane** (`EvaluationResult.reason`) is currently hard-coded in Japanese regardless of the input document's language, as shown in the example output above. The **audit lane** localizes its `reason` strings since v1.4.0 via `--lang` (see above); the pair lane has no English (or other-language) localization of these messages yet.
 
 ---
 
