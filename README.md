@@ -1,4 +1,4 @@
-# Sieve Referee v1.5.0
+# Sieve Referee v1.5.1
 
 English | [日本語](README.ja.md)
 
@@ -137,6 +137,13 @@ sieve-referee ./target_documents -j 4
 | `--json-file` | string | Save results as JSON to the given path |
 | `--fail-on-risk` | flag | Exit with status code `1` if any `RED` signal is found |
 | `-j`, `--jobs` | int | Number of worker processes for evaluation (default: CPU count) |
+
+Reports are safe by default: file names and document text are escaped in every
+HTML output, the standalone report embeds its JSON so that hostile file names
+cannot break the page, the dashboard shows direct RED pairs and indirect-chain
+warnings separately, and files that could not be evaluated (empty or unreadable)
+are listed under the JSON `skipped` key with a closed vocabulary of reasons
+(`empty_input` / `unreadable`) instead of vanishing silently.
 
 ---
 

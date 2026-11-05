@@ -23,7 +23,7 @@
 [ H4 safety-gated cluster promotion ]
         │
         ▼
-[ 12-state LUT lookup → signal, pattern, reason ]
+[ 15-state LUT lookup → signal, pattern, reason ]
 ```
 
 ## The four hypotheses
@@ -48,9 +48,13 @@ favorably on their own — keeps its original, unmodified mask. Its
 membership in the larger cluster is instead reported separately as a
 "transitive chain" (telephone-game) warning.
 
-This distinction matters because 4 of the 16 possible 4-bit states
-(`H3 = 0 ∧ H4 = 1`, with `H1`/`H2` free) are structurally unreachable under
-this invariant, leaving 12 reachable states in the LUT.
+This distinction matters because only 2 of the 16 possible 4-bit states
+(`0001` and `1001`, where cluster membership would stand without any direct
+similarity evidence) are structurally unreachable under this invariant. The
+LUT classifies 15 states — every state except `0001`, which has no table
+entry; `1001` is defined but not producible by the current pipeline — and
+`0011` / `0101` / `0111` arise via cluster promotion and are classified by
+their dedicated entries.
 
 ## Known limitation: structural convergence in formal writing
 

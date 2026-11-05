@@ -1,4 +1,4 @@
-# Sieve Referee v1.5.0
+# Sieve Referee v1.5.1
 
 [English](README.md) | 日本語
 
@@ -137,6 +137,12 @@ sieve-referee ./target_documents -j 4
 | `--json-file` | 文字列 | 判定結果を指定パスのJSONファイルへ保存 |
 | `--fail-on-risk` | フラグ | `RED`シグナルが1件でもあれば終了コード`1`で終了 |
 | `-j`, `--jobs` | 整数 | 評価に使うワーカープロセス数（デフォルト: CPUコア数） |
+
+出力はデフォルトで安全です: すべての HTML 出力でファイル名と本文は escape され、
+スタンドアロンレポートは悪意あるファイル名でもページを壊さない形で JSON を埋め込み、
+ダッシュボードは直接の RED ペアと間接チェーン警告を区別して表示し、評価できなかった
+ファイル（空・読み取り不可）は黙って消えるのではなく、閉じた語彙の理由
+（`empty_input` / `unreadable`）つきで JSON の `skipped` キーに列挙されます。
 
 ---
 

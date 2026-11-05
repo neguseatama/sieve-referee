@@ -19,7 +19,7 @@ from .quantifier_audit import (
     load_vocab_file,
 )
 
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 __all__ = [
     "SieveReferee",
     "batch_evaluate",
