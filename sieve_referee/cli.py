@@ -8,7 +8,7 @@ from .chain_detector import detect_indirect_chains
 from .dashboard_builder import generate_dashboard_html, generate_standalone_dashboard_html
 from .diff_builder import generate_diff_html
 from .evaluator import batch_evaluate, build_clusters
-from .io_utils import safe_read_text
+from .io_utils import read_text_with_reason
 from .models import EvaluationResult
 from .quantifier_audit import (
     TagFileError,
@@ -29,6 +29,22 @@ def result_to_dict(res: EvaluationResult) -> dict:
         "pattern_name": res.pattern_name,
         "reason": res.reason,
     }
+
+
+def _with_skipped(payload, skipped):
+    """skipped が 0 件のときは payload を 1 バイトも変えずに返す。
+
+    非空のときだけ「追加キー」として載せる: リスト payload は
+    {"results": [...], "skipped": [...]} に包み、辞書 payload
+    （監査レーン）には "skipped" キーを追加する。
+    """
+    if not skipped:
+        return payload
+    if isinstance(payload, list):
+        return {"results": payload, "skipped": skipped}
+    enriched = dict(payload)
+    enriched["skipped"] = skipped
+    return enriched
 
 
 def resolve_audit_lang(documents: dict, lang: str) -> str:
@@ -82,10 +98,24 @@ def main():
         sys.exit(2)
 
     doc_dict = {}
+    skipped = []
     for p in target_path.glob("*.txt"):
-        content = safe_read_text(p)
-        if content:
+        try:
+            content, reason = read_text_with_reason(p)
+        except OSError:
+            content, reason = None, "unreadable"
+        if content is None:
+            skipped.append({"path": p.name, "reason": reason})
+        else:
             doc_dict[p.name] = content
+    skipped.sort(key=lambda entry: entry["path"])
+    if skipped:
+        reason_counts = {}
+        for entry in skipped:
+            reason_counts[entry["reason"]] = reason_counts.get(entry["reason"], 0) + 1
+        summary = ", ".join("%s=%d" % (key, reason_counts[key]) for key in sorted(reason_counts))
+        # stderr に出す: --json の stdout を機械可読のまま保つため
+        print("Skipped %d file(s): %s" % (len(skipped), summary), file=sys.stderr)
 
     results: List[EvaluationResult] = []
     if len(doc_dict) >= 2:
@@ -115,6 +145,7 @@ def main():
             payload = {"results": [result_to_dict(r) for r in results], "audit": audit_report.receipt}
         else:
             payload = [result_to_dict(r) for r in results]
+        payload = _with_skipped(payload, skipped)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     if args.json_file:
         out_json_path = Path(args.json_file)
@@ -123,6 +154,7 @@ def main():
             payload = {"results": [result_to_dict(r) for r in results], "audit": audit_report.receipt}
         else:
             payload = [result_to_dict(r) for r in results]
+        payload = _with_skipped(payload, skipped)
         out_json_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
@@ -155,7 +187,7 @@ def main():
             (diff_dir / f"{pair_key}.html").write_text(diff_html_str, encoding="utf-8")
         out_file = output_dir / "sieve_dashboard.html"
         file_names = list(doc_dict.keys())
-        generate_dashboard_html(results, indirect_chains, file_names, out_file)
+        generate_dashboard_html(results, indirect_chains, file_names, out_file, skipped=skipped)
         print(f"Standard HTML report generated: {out_file}")
 
     has_red_risk = any(

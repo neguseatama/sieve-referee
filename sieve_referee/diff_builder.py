@@ -51,11 +51,13 @@ def generate_side_by_side_html(doc_a: str, doc_b: str, evaluation_result=None) -
 def generate_diff_html(doc_a: str, doc_b: str, res) -> str:
     pattern_name = res.pattern_name
     sig_val = res.evaluation_signal.value if hasattr(res.evaluation_signal, "value") else str(res.evaluation_signal)
+    item = html.escape(str(res.item_id))
+    peer = html.escape(str(res.matched_peer_id))
     return f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Diff: {res.item_id} vs {res.matched_peer_id}</title></head>
-<body><h2>{res.item_id} vs {res.matched_peer_id}</h2>
+<html><head><meta charset="UTF-8"><title>Diff: {item} vs {peer}</title></head>
+<body><h2>{item} vs {peer}</h2>
 <p>Signal: {sig_val} | Mask: {res.mask} | Pattern: {pattern_name}</p>
-<div>{doc_a}</div><hr><div>{doc_b}</div></body></html>"""
+<div>{html.escape(str(doc_a), quote=False)}</div><hr><div>{html.escape(str(doc_b), quote=False)}</div></body></html>"""
 
 
 def export_diff_reports(results, documents, output_dir):
