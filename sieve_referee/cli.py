@@ -8,7 +8,7 @@ from .chain_detector import detect_indirect_chains
 from .dashboard_builder import generate_dashboard_html, generate_standalone_dashboard_html
 from .diff_builder import generate_diff_html
 from .evaluator import batch_evaluate, build_clusters
-from .io_utils import read_text_with_reason
+from .io_utils import collect_txt_documents
 from .models import EvaluationResult
 from .quantifier_audit import (
     TagFileError,
@@ -97,18 +97,7 @@ def main():
         print(f"Error: Directory '{args.target_dir}' does not exist.", file=sys.stderr)
         sys.exit(2)
 
-    doc_dict = {}
-    skipped = []
-    for p in target_path.glob("*.txt"):
-        try:
-            content, reason = read_text_with_reason(p)
-        except OSError:
-            content, reason = None, "unreadable"
-        if content is None:
-            skipped.append({"path": p.name, "reason": reason})
-        else:
-            doc_dict[p.name] = content
-    skipped.sort(key=lambda entry: entry["path"])
+    doc_dict, skipped = collect_txt_documents(target_path)
     if skipped:
         reason_counts = {}
         for entry in skipped:
