@@ -99,6 +99,20 @@ for res in results:
     print("-" * 40)
 ```
 
+### ライブラリからディスク上のファイルを読む
+
+CLI と同じ判定でディレクトリを読むには `collect_txt_documents` を使います。
+空や解読不能のファイルは黙って消えるのではなく、`skipped` として報告されます
+（閉じた語彙 `empty_input` / `unreadable`・path 昇順）。
+
+```python
+from sieve_referee.io_utils import collect_txt_documents
+
+documents, skipped = collect_txt_documents("path/to/dir")
+for entry in skipped:
+    print(entry["path"], entry["reason"])   # 例: empty.txt empty_input
+```
+
 ### `EvaluationResult` の属性
 
 | プロパティ | 型 | 説明 |

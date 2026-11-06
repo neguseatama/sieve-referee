@@ -99,6 +99,21 @@ for res in results:
     print("-" * 40)
 ```
 
+### Screening files on disk from the library
+
+To read a directory the way the CLI does, call `collect_txt_documents`: it
+returns the readable documents plus a `skipped` report (same closed
+vocabulary `empty_input` / `unreadable`, entries sorted by path) instead of
+silently dropping empty or undecodable files.
+
+```python
+from sieve_referee.io_utils import collect_txt_documents
+
+documents, skipped = collect_txt_documents("path/to/dir")
+for entry in skipped:
+    print(entry["path"], entry["reason"])   # e.g. empty.txt empty_input
+```
+
 ### `EvaluationResult` fields
 
 | Property | Type | Description |

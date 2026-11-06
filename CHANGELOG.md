@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-11-07
+
+### Added
+- **`skipped` from the library**: the file-reading path is now available as a
+  library API, `sieve_referee.io_utils.collect_txt_documents(directory)`,
+  returning `(documents, skipped)` with the exact same judgment and the same
+  closed vocabulary (`empty_input` / `unreadable`) as the CLI — so library
+  consumers (e.g. Sieve-Tray) can receive the engine's skip report without
+  going through the CLI. `batch_evaluate`, which receives already-read text,
+  keeps its existing return type and keys unchanged: nothing it receives is
+  unread, so it has no skipped entries by construction. The CLI now delegates
+  its own reading loop to the same function; outputs are byte-identical to
+  1.5.1 (pinned molds cover the `--json` stdout and the standard dashboard,
+  with and without skipped files).
+
+### Changed
+- **Version bumped to 1.5.2** (library reporting addition only; no change to
+  already-observed evaluation results, exit codes, or existing output keys).
+
 ## [1.5.1] - 2026-11-06
 
 ### Fixed
