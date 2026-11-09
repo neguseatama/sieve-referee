@@ -6,7 +6,14 @@ Design parameters fixed at red stage (2026-11-09, recorded in the worklog):
 - Explanation layer = a SEPARATE module ``sieve_referee.explain``;
   ``EvaluationResult`` keeps exactly its 10 dataclass fields; judgments are
   identical with or without the layer ("add the explanation without changing
-  the judgment").
+  the judgment"). Per the design chat's third round (worklog §108) the
+  explanation layer's METHOD is the M2 request §3.2 winnowing fingerprint
+  (k=8 chars / w=5 / minimum match length 16 chars), the same mechanism and
+  the same span output contract Scope 1.5.0 uses, so Tray's Cohort can
+  treat both engines in one shape (RF-T11a..c): spans come back at ORIGINAL
+  positions, output is independent of PYTHONHASHSEED (blake2b, never the
+  salted builtin ``hash()``), and shared runs shorter than 16 characters
+  appear in NO report and are NEVER removed.
 - ``nfkc_starts(original) -> (norm_text, starts)``: pure and deterministic;
   ``norm_text == unicodedata.normalize("NFKC", original)``; ``starts`` has
   ``len(norm_text) + 1`` entries, ``starts[0] == 0``,
@@ -29,8 +36,10 @@ Design parameters fixed at red stage (2026-11-09, recorded in the worklog):
   ``item_id``/``matched_peer_id``, never form candidate pairs and never
   enter clusters, so they cannot pollute H4 cluster promotion; (2) spans of
   each submission that match a base document are removed BEFORE the
-  comparison (``sieve_referee.base_strip``: exact-substring matches in NFKC
-  space, left-to-right greedy maximal, minimum span 10 characters, single
+  comparison (``sieve_referee.base_strip``: matches found through the §3.2
+  winnowing fingerprint spans in NFKC space — same k=8/w=5 constants,
+  minimum span 16 characters per the design chat's third round — extended
+  to the full exact-match run around each fingerprint seed, single
   pass; removal positions reported against the text as passed in through
   the NFKC position map). CLI is fail-closed: missing / empty / partially
   unreadable base directory or a base/target identifier collision exits
@@ -65,6 +74,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import unittest
 from pathlib import Path
 
@@ -75,9 +85,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PIN_SPANS_NOSPAN_SHA256 = "3225585909698e790e3d7cad0e49c25e0b4286803cd5215b85c78e89fb8001a8"
 PIN_QUOTE_NOFLAG_SHA256 = "96ba14a2d35bef74e96eb5c4853086c5432aa77ea1f2d7fdf89b4a6cb454feed"
 
-SENTENCE = "萠芽が土を押し上げてきた"
-SA = "ﬁrst note\n萠芽が土を押し上げてきた。二本目の葉が開いた。"
-SB = "second note\n萠芽が土を押し上げてきた。根が伸びた。"
+# Shared sentence grew to 16 chars (design chat's third round: the
+# explanation layer reports fingerprint spans, minimum length 16, so the
+# pinned shared passage must reach that minimum). The preamble keeps the
+# shared sentence its OWN sentence (RED pair). The exact-match extension
+# around a fingerprint seed may reach the sentence-end punctuation, so
+# RF-T05 pins SENTENCE as a substring of the span (RF-T11c pins the exact
+# 16-char slice on a no-adjacent-match structure).
+SENTENCE = "今朝、萠芽が土を押し上げてきた。"
+SA = "ﬁrst観察帳。" + SENTENCE + "二本目の葉が開いた。"
+SB = "second記録簿。" + SENTENCE + "根が伸びた。"
+assert len(SENTENCE) == 16
 SC = "屋上で菜園を始めて三年目になる。夏にはトマトがよく実る。"
 
 C1 = "共通の文章の例です。二文目は独自の内容を含んでいます。"
@@ -251,7 +269,9 @@ class TestRfT05SpansCli(unittest.TestCase):
     def test_rf_t05_spans_flag_reports_raw_file_positions(self):
         """RF-T05: --spans adds a spans key keyed by pair; span positions
         slice the RAW file text (NFKC ligature expansion shifts positions);
-        without --spans the JSON output is byte-identical to the pin."""
+        without --spans the JSON output is byte-identical to the pin.
+        Spans are §3.2 winnowing fingerprint spans (RF-T11); the 16-char
+        shared sentence reaches the minimum fingerprint length."""
         from sieve_referee.explain import nfkc_starts  # noqa: F401 (presence)
 
         with tempfile.TemporaryDirectory() as td:
@@ -283,7 +303,9 @@ class TestRfT05SpansCli(unittest.TestCase):
                     {"a_start", "a_end", "b_start", "b_end"})
                 piece_a = raw_a[span["a_start"]:span["a_end"]]
                 piece_b = raw_b[span["b_start"]:span["b_end"]]
-                if piece_a == SENTENCE and piece_b == SENTENCE:
+                if (SENTENCE in piece_a and SENTENCE in piece_b
+                        and piece_a.endswith(SENTENCE)
+                        and piece_b.endswith(SENTENCE)):
                     hit = True
             self.assertTrue(hit, f"no span recovers the copied sentence: {spans_ab}")
             # GREEN pairs carry empty span lists
@@ -343,9 +365,11 @@ class TestRfT06BaseSegmentsRemoved(unittest.TestCase):
         self.assertNotEqual(_snapshot(results), without)
 
     def test_rf_t06c_short_shared_spans_are_kept(self):
-        """RF-T06c: spans shorter than 10 characters are NOT removed — a
-        base sharing only short template phrases leaves the judgment and
-        the removal report untouched (results equal the no-base run)."""
+        """RF-T06c: spans shorter than 16 characters are NOT removed (the
+        minimum is §3.2's fingerprint minimum, NOT §3.4's quote minimum —
+        fixed by the design chat's third round) — a base sharing only short
+        template phrases leaves the judgment and the removal report
+        untouched (results equal the no-base run)."""
         from sieve_referee.base_strip import strip_base_segments
         from sieve_referee.evaluator import batch_evaluate
 
@@ -378,7 +402,7 @@ class TestRfT06BaseSegmentsRemoved(unittest.TestCase):
         again, removed2 = strip_base_segments(stripped, [ASSIGN])
         self.assertEqual(again, stripped)
         self.assertEqual(removed2, [])
-        self.assertEqual(MIN_BASE_SPAN, 10)
+        self.assertEqual(MIN_BASE_SPAN, 16)
 
     def test_rf_t06e_fully_quoted_submission_becomes_empty(self):
         """RF-T06e: a submission that consists ONLY of base material becomes
@@ -662,6 +686,143 @@ class TestRfT10DependenciesAndDocs(unittest.TestCase):
 
         changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         self.assertIn("[1.6.0]", changelog)
+
+
+class TestRfT11FingerprintSpans(unittest.TestCase):
+    """RF-T11 (design chat's third round, worklog §108): the explanation
+    layer is the M2 request §3.2 winnowing fingerprint — k=8 chars,
+    w=5, minimum match length 16 chars — with the same span output
+    contract Scope 1.5.0 uses. Three pins: original positions,
+    PYTHONHASHSEED independence, and the sub-16-character exclusion."""
+
+    def test_rf_t11a_fingerprint_spans_report_original_positions(self):
+        """RF-T11a: fingerprint match spans come back at ORIGINAL
+        positions. The raw layer: ``fingerprint_match_spans`` locates the
+        shared run in NFKC space. The document layer: ``explain_results``
+        maps the spans through the NFKC position map, so a passage written
+        with a decomposed は+U+3099 on one side and the composed ば on the
+        other is recovered by slicing the ORIGINAL texts on both sides."""
+        from sieve_referee.evaluator import batch_evaluate
+        from sieve_referee.explain import explain_results
+        from sieve_referee.fingerprint import (
+            FINGERPRINT_K,
+            FINGERPRINT_W,
+            MIN_FINGERPRINT_SPAN,
+            fingerprint_match_spans,
+        )
+
+        # §3.2 constants, fixed at red stage
+        self.assertEqual(FINGERPRINT_K, 8)
+        self.assertEqual(FINGERPRINT_W, 5)
+        self.assertEqual(MIN_FINGERPRINT_SPAN, 16)
+
+        # raw layer: one shared run, positions slice the inputs
+        na = "天気の良い朝に畑へ出て土の匂いを確かめた。"
+        nb = "その後、天気の良い朝に畑へ出て土の匂いを確かめた。と記した。"
+        spans = fingerprint_match_spans(na, nb)
+        self.assertEqual(len(spans), 1, spans)
+        self.assertEqual(
+            set(spans[0]), {"a_start", "a_end", "b_start", "b_end"})
+        self.assertEqual(
+            na[spans[0]["a_start"]:spans[0]["a_end"]], na)
+        self.assertEqual(
+            nb[spans[0]["b_start"]:spans[0]["b_end"]], na)
+        # deterministic
+        self.assertEqual(spans, fingerprint_match_spans(na, nb))
+
+        # document layer: NFKC decomposition must map back to originals
+        shared = "ばねの伸びを測った。次に重りを替えた。"  # 19 norm chars
+        da = "観察記録その一。" + "は" + "\u3099" + shared[1:]
+        db = "観察記録その二。" + shared
+        self.assertNotEqual(unicodedata.normalize("NFKC", da), da)
+        documents = {"da.txt": da, "db.txt": db}
+        results = batch_evaluate(documents)
+        before = _snapshot(results)
+        spans_map = explain_results(documents, results)
+        self.assertEqual(_snapshot(results), before)  # no mutation
+        self.assertTrue(len(spans_map["da.txt_vs_db.txt"]) >= 1)
+        recovered = False
+        for sp in spans_map["da.txt_vs_db.txt"]:
+            self.assertEqual(
+                set(sp), {"a_start", "a_end", "b_start", "b_end"})
+            piece_a = da[sp["a_start"]:sp["a_end"]]
+            piece_b = db[sp["b_start"]:sp["b_end"]]
+            if (shared in unicodedata.normalize("NFKC", piece_a)
+                    and shared in unicodedata.normalize("NFKC", piece_b)):
+                recovered = True
+        self.assertTrue(recovered,
+                        f"no span recovers the shared passage: {spans_map}")
+
+    def test_rf_t11b_output_independent_of_pythonhashseed(self):
+        """RF-T11b: changing PYTHONHASHSEED must not change ANY fingerprint
+        output — k-gram hashes, selected winnowing fingerprints, and match
+        spans are identical across interpreter runs (blake2b digest, the
+        salted builtin hash() is never used)."""
+        snippet = (
+            "import json\n"
+            "from sieve_referee.fingerprint import (\n"
+            "    kgram_hashes, winnowing_fingerprints, fingerprint_match_spans)\n"
+            "t = '観察ノートでは朝晩の気温と土の湿り気を書き留めた。'\n"
+            "u = '同行者の観察ノートでは朝晩の気温と土の湿り気を書き留めた。とある。'\n"
+            "print(json.dumps({'k': kgram_hashes(t),\n"
+            "                  'w': winnowing_fingerprints(u),\n"
+            "                  'm': fingerprint_match_spans(t, u)},\n"
+            "                 ensure_ascii=False))\n"
+        )
+        outs = []
+        for seed in ("0", "1", "random"):
+            env = dict(os.environ, PYTHONHASHSEED=seed)
+            proc = subprocess.run(
+                [sys.executable, "-c", snippet],
+                cwd=str(REPO_ROOT), env=env,
+                capture_output=True, text=True, timeout=120)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            outs.append(proc.stdout)
+        self.assertEqual(outs[0], outs[1])
+        self.assertEqual(outs[1], outs[2])
+
+    def test_rf_t11c_shared_runs_below_16_chars_never_reported_or_removed(self):
+        """RF-T11c: shared runs shorter than 16 characters appear in NO
+        report and are NEVER removed. A 15-char shared run yields no
+        fingerprint span (fingerprint_match_spans == []), leaves
+        strip_base_segments untouched, and yields empty explanation spans;
+        the 16-char boundary run IS reported and removed."""
+        from sieve_referee.base_strip import strip_base_segments
+        from sieve_referee.evaluator import batch_evaluate
+        from sieve_referee.explain import explain_results
+        from sieve_referee.fingerprint import fingerprint_match_spans
+
+        fifteen = "雨が続いた翌朝も畑は湿っていた"        # 15 chars
+        sixteen = "雨が続いた翌朝も畑は湿っていた。"      # 16 chars
+        self.assertEqual(len(fifteen), 15)
+        self.assertEqual(len(sixteen), 16)
+
+        fa = "前置き" + fifteen + "あとがき"
+        fb = "ほかの内容" + fifteen + "違う続き"
+        self.assertEqual(fingerprint_match_spans(fa, fb), [])
+        sa, ra = strip_base_segments(fa, [fb])
+        self.assertEqual(sa, fa)
+        self.assertEqual(ra, [])
+        # no explanation span either (the report side)
+        docs = {"x.txt": "観察はじめ。" + fifteen + "個人的な記述。",
+                "y.txt": "別の観察だ。" + fifteen + "独自の記述。"}
+        results = batch_evaluate(docs)
+        spans_map = explain_results(docs, results)
+        for key, sp in spans_map.items():
+            self.assertEqual(sp, [], f"{key} reported a sub-16 span: {sp}")
+
+        # boundary: exactly 16 chars IS reported and removed
+        ca = "前置き" + sixteen + "あとがき"
+        cb = "ほかの内容" + sixteen + "違う続き"
+        spans = fingerprint_match_spans(ca, cb)
+        self.assertEqual(len(spans), 1, spans)
+        self.assertEqual(ca[spans[0]["a_start"]:spans[0]["a_end"]], sixteen)
+        self.assertEqual(cb[spans[0]["b_start"]:spans[0]["b_end"]], sixteen)
+        sc, rc = strip_base_segments(ca, [cb])
+        self.assertEqual(sc, "前置きあとがき")
+        self.assertEqual(len(rc), 1)
+        self.assertEqual(rc[0]["text"], sixteen)
+        self.assertEqual(ca[rc[0]["start"]:rc[0]["end"]], sixteen)
 
 
 if __name__ == "__main__":
