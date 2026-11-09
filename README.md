@@ -114,19 +114,37 @@ for entry in skipped:
     print(entry["path"], entry["reason"])   # e.g. empty.txt empty_input
 ```
 
-### Base documents and citation exclusion (library)
+### Base documents and quote/bibliography exclusion (library)
 
-`batch_evaluate` takes two optional keyword arguments (both default to the
-v1.5.2 behavior):
+`batch_evaluate` takes one base argument and two independent exclusion
+keyword arguments (all default to the v1.5.2 behavior; per the M2 request
+the two exclusions are separate arguments — no combined alias):
 
 ```python
 from sieve_referee import batch_evaluate
 
 results = batch_evaluate(
     documents,
-    base_documents={"template.txt": template_text},  # excluded from the universe
-    exclude_citations=True,                          # strip quotes + bibliographies first
+    base_documents={"assignment.txt": assignment_text},
+    # §3.3, BOTH obligations: the base never enters the universe AND each
+    # submission's base-matching spans (NFKC-exact, >= 10 characters,
+    # left-to-right greedy maximal) are removed before the comparison.
+    exclude_quotes=True,        # strip 「…」 pairs with 10+ inner characters
+    exclude_bibliography=True,  # strip the six bibliography heading sections
 )
+```
+
+`base_documents` takes the base texts as given — they are the matching
+reference; only the submissions are preprocessed. When both exclusion
+arguments are on, the bibliography is removed first, then the quotes.
+The removal itself is available as a library call with an exact position
+report against the text as passed in:
+
+```python
+from sieve_referee.base_strip import strip_base_segments
+
+stripped, removed = strip_base_segments(text, base_texts)
+# removed: [{"start", "end", "length", "text"}, ...] — positions into `text`
 ```
 
 ### Explanation layer (spans)
@@ -186,9 +204,10 @@ sieve-referee ./target_documents -j 4
 | `--json-file` | string | Save results as JSON to the given path |
 | `--fail-on-risk` | flag | Exit with status code `1` if any `RED` signal is found |
 | `-j`, `--jobs` | int | Number of worker processes for evaluation (default: CPU count) |
-| `--spans` | flag | Explanation layer: add a `spans` key to the `--json` / `--json-file` payload — per pair, the sentence-level matches behind the H3 flag with positions into the RAW file text (NFKC mapped back). Cannot be combined with `--exclude-citations`. Without the flag the output is byte-identical |
-| `--base` | string | Base-documents directory (`.txt`). Those documents are excluded from the evaluation universe entirely — they never appear in results or clusters (a shared assignment template can no longer escalate innocent pairs via cluster promotion). Fail-closed: a missing, empty or partially unreadable base directory, or a name colliding with a target document, exits with status `2` |
-| `--exclude-citations` | flag | Remove quotations (「…」 pairs with at least 10 inner characters) and bibliography sections (a heading line equal to one of 参考文献 / 引用文献 / References / Bibliography / Works Cited / Literature Cited, case-insensitively, excludes the rest of the document) before comparison. Default OFF: without the flag the output is byte-identical |
+| `--spans` | flag | Explanation layer: add a `spans` key to the `--json` / `--json-file` payload — per pair, the sentence-level matches behind the H3 flag with positions into the RAW file text (NFKC mapped back). Cannot be combined with any flag that changes the judged text (`--exclude-quotes` / `--exclude-bibliography` / `--base`). Without the flag the output is byte-identical |
+| `--base` | string | Base-documents directory (`.txt`), both §3.3 obligations: (1) those documents are excluded from the evaluation universe entirely — they never appear in results or clusters (a shared assignment template can no longer escalate innocent pairs via cluster promotion), and (2) each submission's base-matching spans (NFKC-exact, at least 10 characters, left-to-right greedy maximal) are removed before the comparison. Fail-closed: a missing, empty or partially unreadable base directory, or a name colliding with a target document, exits with status `2` |
+| `--exclude-quotes` | flag | Remove quotations (「…」 pairs with at least 10 inner characters) before comparison. Default OFF: without the flag the output is byte-identical |
+| `--exclude-bibliography` | flag | Remove bibliography sections (a heading line equal to one of 参考文献 / 引用文献 / References / Bibliography / Works Cited / Literature Cited, case-insensitively, excludes the rest of the document) before comparison. Default OFF: without the flag the output is byte-identical. The two exclusions are independent flags (no combined alias); when both are given the bibliography is removed first, then the quotes |
 
 Reports are safe by default: file names and document text are escaped in every
 HTML output, the standalone report embeds its JSON so that hostile file names

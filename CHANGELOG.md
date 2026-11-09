@@ -24,30 +24,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`{"pair_key": [{"a_start", "a_end", "b_start", "b_end"}]}`, positions
   composed back to the RAW file text through the same map; the file is
   re-read and must be unchanged, otherwise exit 2). `--spans` cannot be
-  combined with `--exclude-citations` (exit 2). Without the flag every
-  output stays byte-identical (pinned molds).
-- **Base documents (`--base`, `base_documents=`)**: documents given as base
-  (e.g. the assignment template) are excluded from the evaluation universe
-  entirely — they never appear as `item_id`/`matched_peer_id`, never form
-  candidate pairs and never enter clusters, so they can no longer escalate
-  innocent pairs through H4 cluster promotion (measured on 1.5.2: a shared
-  template turned a direct `1010` PARAPHRASE_DETECTED into
-  `1011` CLUSTER_PARAPHRASE_GROUP for a pair whose own content only shared
-  the template's format). Results equal evaluating the documents dict alone.
-  The CLI is fail-closed: a missing, empty or partially unreadable base
-  directory, or a base file name colliding with a target document, exits
-  with status 2 and an `Error:` line.
-- **Citation / bibliography exclusion (`--exclude-citations`,
-  `exclude_citations=`, default OFF)**: before comparison, removes (1)
+  combined with any flag that changes the judged text —
+  `--exclude-quotes` / `--exclude-bibliography` / `--base` (exit 2). Without
+  the flag every output stays byte-identical (pinned molds).
+- **Base documents (`--base`, `base_documents=`) — both §3.3 obligations**:
+  (1) documents given as base (e.g. the assignment text) are excluded from
+  the evaluation universe entirely — they never appear as
+  `item_id`/`matched_peer_id`, never form candidate pairs and never enter
+  clusters, so they can no longer escalate innocent pairs through H4
+  cluster promotion (measured on 1.5.2: a shared template turned a direct
+  `1010` PARAPHRASE_DETECTED into `1011` CLUSTER_PARAPHRASE_GROUP for a
+  pair whose own content only shared the template's format); AND (2) spans
+  of each submission that match a base document are removed BEFORE the
+  comparison (`sieve_referee.base_strip.strip_base_segments`: exact-
+  substring matches in NFKC space, left-to-right greedy maximal, minimum
+  span 10 characters, single pass — so submissions sharing only the
+  assignment text no longer look similar to each other). The removal
+  report maps every removed span back to the text as passed in
+  (`{"start", "end", "length", "text"}` through the NFKC position map); a
+  submission left empty by the removal flows through the existing GREEN
+  vocabulary. The CLI is fail-closed: a missing, empty or partially
+  unreadable base directory, or a base file name colliding with a target
+  document, exits with status 2 and an `Error:` line.
+- **Quote exclusion (`--exclude-quotes`, `exclude_quotes=`, default OFF)**:
+  before comparison, removes 「…」 quotation pairs whose inner text is at
+  least 10 characters (single left-to-right pass, brackets included;
+  shorter pairs are kept). With the flag absent nothing changes
+  (byte-identical, pinned).
+- **Bibliography exclusion (`--exclude-bibliography`,
+  `exclude_bibliography=`, default OFF)**: before comparison, removes
   bibliography sections — a heading line equal to one of
   参考文献 / 引用文献 / References / Bibliography / Works Cited /
   Literature Cited (Latin words case-insensitively), from that line to the
-  end of the document — then (2) 「…」 quotation pairs whose inner text is at
-  least 10 characters (single left-to-right pass, brackets included; shorter
-  pairs are kept). With the flag absent nothing changes (byte-identical,
-  pinned); with the flag on, a pair whose only overlap was a long quotation
-  or a shared bibliography becomes GREEN while short quotation pairs keep
-  the original judgment.
+  end of the document. With the flag absent nothing changes
+  (byte-identical, pinned). The two exclusions are independent flags per
+  the M2 request §3.4 (the design-review round split the single
+  `--exclude-citations` flag of the first draft; no combined alias is
+  kept, so the Tray checkboxes can map 1:1). When both are requested the
+  bibliography is removed first, then the quotes (order fixed at the red
+  stage); a pair whose only overlap was a long quotation or a shared
+  bibliography becomes GREEN while short quotation pairs keep the
+  original judgment.
 
 ### Changed
 - **The `sieve-core-engine` dependency declaration is removed**
