@@ -8,26 +8,25 @@ This module is deliberately SEPARATE from the judgment pipeline:
   both NFKC shapes measured for the M2 lane: decomposition
   ("か" + U+3099 combining dakuten -> "が", 2 original chars -> 1 normalized
   char) and expansion (U+FB01 ligature -> "fi", 1 -> 2).
-- ``explain_results`` re-derives the sentence-level match spans that drive
-  the H3 flagging (window_size == 1 chunk pairs with
-  ``h3 >= h3_threshold``, the same rule ``SieveReferee.evaluate_pair`` uses)
-  and maps them back to original-text positions.
-
-Nothing here mutates an ``EvaluationResult`` or changes any judgment; the
-results of the engine are identical with or without the explanation layer
-(pinned by tests/test_v1_6_0_m2.py::TestRfT04ExplanationDoesNotTouchJudgments).
+- ``explain_results`` reports the matched spans found by the M2 request
+  §3.2 winnowing fingerprint (k=8 characters, w=5, minimum match length 16
+  characters — the constants live in ``sieve_referee.fingerprint``), mapped
+  back to original-text positions. This is the same mechanism and the same
+  span output contract Scope 1.5.0 uses, so Tray's Cohort can treat both
+  engines in one shape (design chat's third round, worklog §108). The
+  layer reports shared runs REGARDLESS of the judgment (GREEN pairs with a
+  >=16-char shared run are reported too); it never mutates an
+  ``EvaluationResult`` or changes any judgment — the results of the engine
+  are identical with or without the explanation layer (pinned by
+  tests/test_v1_6_0_m2.py::TestRfT04ExplanationDoesNotTouchJudgments).
 """
 
-import re
 import unicodedata
 from typing import Dict, List, Tuple
 
-from .chunker import split_into_multi_scale_windows
-from .metrics import calc_h3_content_similarity
+from .fingerprint import fingerprint_match_spans
 
 __all__ = ["nfkc_starts", "explain_results"]
-
-_DELIM = re.compile(r"正?。|！|？|\n")
 
 # Combining marks that NFKC can compose into a preceding base character.
 _MARK_CATEGORIES = ("Mn", "Mc", "Me")
@@ -142,47 +141,22 @@ def _cluster_end_offsets(original: str) -> List[int]:
     return ends
 
 
-def _sentence_spans(text: str) -> List[Tuple[int, int]]:
-    """Original-sentence spans mirroring chunker.split_into_multi_scale_windows.
-
-    The chunker keeps the non-blank segments of
-    ``re.split(r"正?。|！|？|\\n", text)`` in order (stripped, with "。" appended
-    to the chunk text); this returns the stripped [start, end) span of each
-    kept segment, so kept-segment index == window_size-1 chunk_id.
-    """
-    spans: List[Tuple[int, int]] = []
-
-    def push(s: int, e: int) -> None:
-        seg = text[s:e]
-        if seg.strip():
-            lead = len(seg) - len(seg.lstrip())
-            trail = len(seg) - len(seg.rstrip())
-            spans.append((s + lead, e - trail))
-
-    pos = 0
-    for m in _DELIM.finditer(text):
-        push(pos, m.start())
-        pos = m.end()
-    push(pos, len(text))
-    return spans
-
-
-def explain_results(documents: Dict[str, str], results, h3_threshold: float = 0.45) -> Dict[str, List[Dict[str, int]]]:
-    """Collect the sentence-level match spans behind each pair's H3 flag.
+def explain_results(documents: Dict[str, str], results) -> Dict[str, List[Dict[str, int]]]:
+    """Collect the §3.2 fingerprint match spans behind each pair.
 
     ``documents`` maps document ids to the SAME texts that were passed to
     ``batch_evaluate``; ``results`` is the engine's output list. For every
     result the returned dict carries the pair key
     ``"{item_id}_vs_{matched_peer_id}"`` (the same key the CLI diff reports
-    use) to a list of spans ``{"a_start", "a_end", "b_start", "b_end"}`` with
-    positions into the texts as passed in (the caller's originals). A span is
-    emitted for every window_size-1 chunk pair whose H3 similarity reaches
-    ``h3_threshold`` — the same condition that drives the engine's flagged
-    sentences. Pairs with no such sentence pair get an empty list. Judgment
-    values are never modified.
+    use) to a list of spans ``{"a_start", "a_end", "b_start", "b_end"}``
+    with positions into the texts as passed in (the caller's originals).
+    A span is emitted for every shared exact-match run of at least
+    ``MIN_FINGERPRINT_SPAN`` (16) characters found through the winnowing
+    fingerprint (k=8, w=5) — independent of the judgment, so a GREEN pair
+    sharing a long run is reported as well. Pairs with no such shared run
+    get an empty list. Judgment values are never modified.
     """
     maps = {doc_id: nfkc_starts(text) for doc_id, text in documents.items()}
-    sent_spans = {doc_id: _sentence_spans(norm) for doc_id, (norm, _) in maps.items()}
 
     out: Dict[str, List[Dict[str, int]]] = {}
     for res in results:
@@ -191,24 +165,12 @@ def explain_results(documents: Dict[str, str], results, h3_threshold: float = 0.
         if res.item_id in documents and res.matched_peer_id in documents:
             norm_a, starts_a = maps[res.item_id]
             norm_b, starts_b = maps[res.matched_peer_id]
-            spans_a = sent_spans[res.item_id]
-            spans_b = sent_spans[res.matched_peer_id]
-            chunks_a = split_into_multi_scale_windows(norm_a, [1, 2])
-            chunks_b = split_into_multi_scale_windows(norm_b, [1, 2])
-            for ca in chunks_a:
-                if ca.window_size != 1:
-                    continue
-                for cb in chunks_b:
-                    if cb.window_size != 1:
-                        continue
-                    if calc_h3_content_similarity(ca.text, cb.text) >= h3_threshold:
-                        sa = spans_a[ca.chunk_id]
-                        sb = spans_b[cb.chunk_id]
-                        spans.append({
-                            "a_start": starts_a[sa[0]],
-                            "a_end": starts_a[sa[1]],
-                            "b_start": starts_b[sb[0]],
-                            "b_end": starts_b[sb[1]],
-                        })
+            for m in fingerprint_match_spans(norm_a, norm_b):
+                spans.append({
+                    "a_start": starts_a[m["a_start"]],
+                    "a_end": starts_a[m["a_end"]],
+                    "b_start": starts_b[m["b_start"]],
+                    "b_end": starts_b[m["b_end"]],
+                })
         out[key] = spans
     return out

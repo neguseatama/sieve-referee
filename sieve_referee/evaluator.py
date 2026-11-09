@@ -97,11 +97,12 @@ def batch_evaluate(
     base_documents（基準文書・CLI の --base）は依頼書 §3.3 の 2 義務を両方果たす:
     ①評価宇宙から完全に除外する（正規化と語彙の検証対象にはなるが、item にも
     peer にも候補ペアにもクラスタにも現れない — 基準文書由来の H4 昇格汚染を
-    構造的に防ぐ）＋ ②各提出物の中にある base と一致する区間（NFKC 空間で
-    10 文字以上の完全一致スパン・左→右 greedy 最長・単一パス）を評価の前に
-    取り除く（sieve_referee.base_strip）。②により・課題文を引用しているだけの
-    提出物どうしが似ていると判定されなくなる。除去で空になった文書は
-    既存の語彙（GREEN・決定論）で扱われる。"""
+    構造的に防ぐ）＋ ②各提出物の中にある base と一致する区間（依頼書 §3.2 の
+    winnowing 指紋・k=8 文字/w=5 が見つけた一致を種に・前後の完全一致に延長し・
+    最小 16 文字（§3.2 の指紋最小長）以上の区間のみ）を評価の前に取り除く
+    （sieve_referee.base_strip）。②により・課題文を引用しているだけの提出物
+    どうしが似ていると判定されなくなる。除去で空になった文書は既存の語彙
+    （GREEN・決定論）で扱われる。"""
     if exclude_bibliography:
         documents = {doc_id: strip_bibliography(content) for doc_id, content in documents.items()}
     if exclude_quotes:

@@ -803,9 +803,11 @@ class TestRfT11FingerprintSpans(unittest.TestCase):
         sa, ra = strip_base_segments(fa, [fb])
         self.assertEqual(sa, fa)
         self.assertEqual(ra, [])
-        # no explanation span either (the report side)
-        docs = {"x.txt": "観察はじめ。" + fifteen + "個人的な記述。",
-                "y.txt": "別の観察だ。" + fifteen + "独自の記述。"}
+        # no explanation span either (the report side); the preambles end
+        # with DIFFERENT characters so the exact-match extension cannot
+        # reach past the 15-char shared run
+        docs = {"x.txt": "観察はじめの記帳" + fifteen + "個人的な記述。",
+                "y.txt": "別の観察による" + fifteen + "独自の記述。"}
         results = batch_evaluate(docs)
         spans_map = explain_results(docs, results)
         for key, sp in spans_map.items():
