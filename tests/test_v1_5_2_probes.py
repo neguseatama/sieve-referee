@@ -180,10 +180,13 @@ class TestRfT12Molds(unittest.TestCase):
 
 class TestRfT13VersionChangelog(unittest.TestCase):
     def test_rf_t13_version_and_changelog_consistent(self):
-        """RF-T13: pyproject version is 1.5.2 and CHANGELOG.md documents it."""
+        """RF-T13: pyproject version is 1.6.0 and CHANGELOG.md documents it
+        (version pins follow each lane; the 1.5.2 record stays in the
+        CHANGELOG)."""
         pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-        self.assertIn('version = "1.5.2"', pyproject)
+        self.assertIn('version = "1.6.0"', pyproject)
         changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn("[1.6.0]", changelog)
         self.assertIn("[1.5.2]", changelog)
 
 

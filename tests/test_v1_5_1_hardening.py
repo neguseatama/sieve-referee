@@ -330,13 +330,14 @@ class TestVersionAndChangelog(unittest.TestCase):
         import re
         pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         init_py = (REPO_ROOT / "sieve_referee" / "__init__.py").read_text(encoding="utf-8")
-        # 版 pin はレーンごとに追随して更新する（v1.5.2 レーン・v1.5.1 の記録は
-        # CHANGELOG の [1.5.1] 節が保持する）
-        self.assertIn('version = "1.5.2"', pyproject)
-        self.assertIn('__version__ = "1.5.2"', init_py)
+        # 版 pin はレーンごとに追随して更新する（v1.6.0 レーン・v1.5.2/v1.5.1 の記録は
+        # CHANGELOG の各節が保持する）
+        self.assertIn('version = "1.6.0"', pyproject)
+        self.assertIn('__version__ = "1.6.0"', init_py)
         changelog = REPO_ROOT / "CHANGELOG.md"
         self.assertTrue(changelog.exists(), "CHANGELOG.md must exist from 1.5.1")
         changelog_text = changelog.read_text(encoding="utf-8")
+        self.assertIn("## [1.6.0]", changelog_text)
         self.assertIn("## [1.5.2]", changelog_text)
         self.assertIn("## [1.5.1]", changelog_text)
 

@@ -1,4 +1,4 @@
-# Sieve Referee v1.5.1
+# Sieve Referee v1.6.0
 
 English | [日本語](README.ja.md)
 
@@ -114,7 +114,37 @@ for entry in skipped:
     print(entry["path"], entry["reason"])   # e.g. empty.txt empty_input
 ```
 
+### Base documents and citation exclusion (library)
+
+`batch_evaluate` takes two optional keyword arguments (both default to the
+v1.5.2 behavior):
+
+```python
+from sieve_referee import batch_evaluate
+
+results = batch_evaluate(
+    documents,
+    base_documents={"template.txt": template_text},  # excluded from the universe
+    exclude_citations=True,                          # strip quotes + bibliographies first
+)
+```
+
+### Explanation layer (spans)
+
+The explanation layer lives in `sieve_referee.explain` and never changes a
+judgment. `nfkc_starts(original)` builds the deterministic NFKC position map
+(`norm_text, starts` — normalized range `[s, e)` recovers
+`original[starts[s]:starts[e]]`, covering both decomposition (か+U+3099 → が)
+and expansion (U+FB01 → fi)); `explain_results(documents, results)` returns,
+for every pair, the sentence-level spans that drove the H3 flag, with
+positions into the texts as passed in. The CLI exposes this through
+`--spans` (positions composed back to the raw file text).
+
 ### `EvaluationResult` fields
+
+All ten dataclass fields are listed below; the judgment itself is carried by
+`evaluation_signal` / `mask` / `pattern_name` / `reason`, and the four score
+fields document how that judgment was reached.
 
 | Property | Type | Description |
 |---|---|---|
@@ -124,6 +154,10 @@ for entry in skipped:
 | `mask` | `str` | 4-bit hypothesis mask, e.g. `"1010"` |
 | `pattern_name` | `str` | LUT pattern name, e.g. `"PARAPHRASE_DETECTED"` |
 | `reason` | `str` | Human-readable explanation of the judgment |
+| `structural_density` | `float` | H1: distinct-character density of the primary document |
+| `max_structure_similarity` | `float` | H2: best skeleton n-gram similarity against the peer |
+| `max_content_similarity` | `float` | H3: best content-word similarity against the peer |
+| `coverage` | `float` | Share of the primary document's sentences that drove the H3 flag |
 
 ---
 
@@ -152,6 +186,9 @@ sieve-referee ./target_documents -j 4
 | `--json-file` | string | Save results as JSON to the given path |
 | `--fail-on-risk` | flag | Exit with status code `1` if any `RED` signal is found |
 | `-j`, `--jobs` | int | Number of worker processes for evaluation (default: CPU count) |
+| `--spans` | flag | Explanation layer: add a `spans` key to the `--json` / `--json-file` payload — per pair, the sentence-level matches behind the H3 flag with positions into the RAW file text (NFKC mapped back). Cannot be combined with `--exclude-citations`. Without the flag the output is byte-identical |
+| `--base` | string | Base-documents directory (`.txt`). Those documents are excluded from the evaluation universe entirely — they never appear in results or clusters (a shared assignment template can no longer escalate innocent pairs via cluster promotion). Fail-closed: a missing, empty or partially unreadable base directory, or a name colliding with a target document, exits with status `2` |
+| `--exclude-citations` | flag | Remove quotations (「…」 pairs with at least 10 inner characters) and bibliography sections (a heading line equal to one of 参考文献 / 引用文献 / References / Bibliography / Works Cited / Literature Cited, case-insensitively, excludes the rest of the document) before comparison. Default OFF: without the flag the output is byte-identical |
 
 Reports are safe by default: file names and document text are escaped in every
 HTML output, the standalone report embeds its JSON so that hostile file names

@@ -1,4 +1,4 @@
-# Sieve Referee v1.5.1
+# Sieve Referee v1.6.0
 
 [English](README.md) | 日本語
 
@@ -115,6 +115,10 @@ for entry in skipped:
 
 ### `EvaluationResult` の属性
 
+10 個の dataclass 属性をすべて掲載します。判定そのものは
+`evaluation_signal` / `mask` / `pattern_name` / `reason` が担い、4 つの
+スコア属性が判定に至った根拠を示します。
+
 | プロパティ | 型 | 説明 |
 |---|---|---|
 | `item_id` | `str` | 評価対象の文書ID |
@@ -123,6 +127,10 @@ for entry in skipped:
 | `mask` | `str` | 4ビット仮説マスク（例: `"1010"`） |
 | `pattern_name` | `str` | LUTパターン名（例: `"PARAPHRASE_DETECTED"`） |
 | `reason` | `str` | 判定理由の説明文 |
+| `structural_density` | `float` | H1: 主文書の異なる文字の密度 |
+| `max_structure_similarity` | `float` | H2: 比較相手との骨格 n-gram 類似度の最大値 |
+| `max_content_similarity` | `float` | H3: 比較相手との内容語類似度の最大値 |
+| `coverage` | `float` | 主文書の文のうち H3 判定の根拠となった割合 |
 
 ---
 
@@ -151,6 +159,9 @@ sieve-referee ./target_documents -j 4
 | `--json-file` | 文字列 | 判定結果を指定パスのJSONファイルへ保存 |
 | `--fail-on-risk` | フラグ | `RED`シグナルが1件でもあれば終了コード`1`で終了 |
 | `-j`, `--jobs` | 整数 | 評価に使うワーカープロセス数（デフォルト: CPUコア数） |
+| `--spans` | フラグ | 説明層: `--json` / `--json-file` の payload に `spans` キーを追加し、ペアごとに H3 判定の根拠となった文単位の一致を RAW ファイル原文の位置（NFKC 対応表で逆引き）で示す。`--exclude-citations` とは併用不可。指定しない限り出力は1バイトも変わらない |
+| `--base` | 文字列 | 基準文書ディレクトリ（`.txt`）。ここにある文書は評価宇宙から完全に除外される（結果・クラスタに現れないため、共通テンプレートによる無実のペアのクラスタ昇格が起きない）。fail-closed: ディレクトリが不在・空・読めないファイルを含む、または対象文書と名前が衝突する場合は終了コード`2` |
+| `--exclude-citations` | フラグ | 比較前に引用（内側10文字以上の「…」対）と参考文献節（参考文献 / 引用文献 / References / Bibliography / Works Cited / Literature Cited の6種見出し語彙・Latinは大文字小文字を無視して一致、その行から文書末尾まで）を除去する。既定は無効（指定しない限り出力は1バイトも変わらない） |
 
 出力はデフォルトで安全です: すべての HTML 出力でファイル名と本文は escape され、
 スタンドアロンレポートは悪意あるファイル名でもページを壊さない形で JSON を埋め込み、

@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-11-09
+
+### Added
+- **Explanation layer (`--spans`, `sieve_referee.explain`)**: every pair can
+  now be explained against the ORIGINAL text without changing any judgment.
+  `nfkc_starts(original)` builds the deterministic NFKC position map
+  (normalized position → original start position, non-decreasing, with a
+  sentinel; verified against the true normalization with an exact
+  prefix-length fallback), covering both NFKC shapes: decomposition
+  (か + combining dakuten → が, 2 → 1) and expansion (U+FB01 ligature → "fi",
+  1 → 2). `explain_results(documents, results)` returns, per pair, the
+  sentence-level spans that drove the H3 flag (window-size-1 chunk pairs at
+  or above the H3 threshold — the same rule the engine uses), with positions
+  into the texts as passed in. `EvaluationResult` keeps exactly its ten
+  fields; results are identical with or without the layer. The CLI
+  `--spans` flag adds a `spans` key to the `--json` / `--json-file` payload
+  (`{"pair_key": [{"a_start", "a_end", "b_start", "b_end"}]}`, positions
+  composed back to the RAW file text through the same map; the file is
+  re-read and must be unchanged, otherwise exit 2). `--spans` cannot be
+  combined with `--exclude-citations` (exit 2). Without the flag every
+  output stays byte-identical (pinned molds).
+- **Base documents (`--base`, `base_documents=`)**: documents given as base
+  (e.g. the assignment template) are excluded from the evaluation universe
+  entirely — they never appear as `item_id`/`matched_peer_id`, never form
+  candidate pairs and never enter clusters, so they can no longer escalate
+  innocent pairs through H4 cluster promotion (measured on 1.5.2: a shared
+  template turned a direct `1010` PARAPHRASE_DETECTED into
+  `1011` CLUSTER_PARAPHRASE_GROUP for a pair whose own content only shared
+  the template's format). Results equal evaluating the documents dict alone.
+  The CLI is fail-closed: a missing, empty or partially unreadable base
+  directory, or a base file name colliding with a target document, exits
+  with status 2 and an `Error:` line.
+- **Citation / bibliography exclusion (`--exclude-citations`,
+  `exclude_citations=`, default OFF)**: before comparison, removes (1)
+  bibliography sections — a heading line equal to one of
+  参考文献 / 引用文献 / References / Bibliography / Works Cited /
+  Literature Cited (Latin words case-insensitively), from that line to the
+  end of the document — then (2) 「…」 quotation pairs whose inner text is at
+  least 10 characters (single left-to-right pass, brackets included; shorter
+  pairs are kept). With the flag absent nothing changes (byte-identical,
+  pinned); with the flag on, a pair whose only overlap was a long quotation
+  or a shared bibliography becomes GREEN while short quotation pairs keep
+  the original judgment.
+
+### Changed
+- **The `sieve-core-engine` dependency declaration is removed**
+  (`dependencies = []`): the package imports no `sieve_core` module and
+  references none by string (re-measured in this lane); Referee has been
+  zero-dependency in fact, and is now zero-dependency in metadata as well.
+  The PEP 639 license form is untouched
+  (`license = "MIT"` + `license-files = ["LICENSE"]` + `setuptools>=77.0`,
+  no License classifier — measured on PyPI 1.5.2 as
+  `license_expression`/`license_files`).
+- **Version bumped to 1.6.0**; README (en/ja) headers updated and the
+  `EvaluationResult` attribute table now lists all ten fields (previously
+  six of ten).
+
 ## [1.5.2] - 2026-11-07
 
 ### Added
