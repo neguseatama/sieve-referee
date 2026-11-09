@@ -18,22 +18,37 @@ Design parameters fixed at red stage (2026-11-09, recorded in the worklog):
   (``{pair_key: [span, ...]}``); each span is
   ``{"a_start", "a_end", "b_start", "b_end"}`` with positions into the RAW
   file text (composed through the NFKC map). Without ``--spans`` the CLI
-  output stays byte-identical to the pre-1.6.0 pins below.
-- ``base_documents`` (``batch_evaluate`` kwarg) / ``--base DIR`` (CLI): base
-  documents are excluded from the evaluation universe entirely — they never
-  appear as ``item_id``/``matched_peer_id``, never form candidate pairs and
-  never enter clusters, so they cannot pollute H4 cluster promotion.
-  Results are exactly those of evaluating ``documents`` alone. CLI is
-  fail-closed: missing / empty / partially unreadable base directory or a
-  base/target identifier collision exits with status 2.
-- ``--exclude-citations`` (CLI) / ``exclude_citations`` (``batch_evaluate``
-  kwarg), default OFF: removes (1) bibliography sections — a heading line
-  whose text (after stripping surrounding whitespace and leading ``#``)
-  equals, case-insensitively for Latin letters, one of the six words
-  参考文献 / 引用文献 / References / Bibliography / Works Cited /
-  Literature Cited — from that line to the end of the document, then (2)
-  quotation pairs 「...」 whose inner text is at least 10 characters long.
-  With the flag absent nothing changes (byte-identical outputs).
+  output stays byte-identical to the pre-1.6.0 pins below. ``--spans``
+  cannot be combined with any flag that changes the judged text
+  (``--exclude-quotes`` / ``--exclude-bibliography`` / ``--base``):
+  status 2.
+- ``base_documents`` (``batch_evaluate`` kwarg) / ``--base DIR`` (CLI), per
+  the M2 request §3.3 BOTH obligations — revised during the design-review
+  round (the first draft implemented only the first): (1) base documents
+  are excluded from the evaluation universe entirely — they never appear as
+  ``item_id``/``matched_peer_id``, never form candidate pairs and never
+  enter clusters, so they cannot pollute H4 cluster promotion; (2) spans of
+  each submission that match a base document are removed BEFORE the
+  comparison (``sieve_referee.base_strip``: exact-substring matches in NFKC
+  space, left-to-right greedy maximal, minimum span 10 characters, single
+  pass; removal positions reported against the text as passed in through
+  the NFKC position map). CLI is fail-closed: missing / empty / partially
+  unreadable base directory or a base/target identifier collision exits
+  with status 2.
+- Quote and bibliography exclusion (M2 request §3.4: TWO independent
+  flags — revised during the design-review round, which split the single
+  ``--exclude-citations`` flag of the first draft; no combined alias is
+  kept), default OFF: ``--exclude-quotes`` / ``exclude_quotes=`` removes
+  「...」 quotation pairs whose inner text is at least 10 characters long
+  (single left-to-right pass, brackets included; shorter pairs are kept);
+  ``--exclude-bibliography`` / ``exclude_bibliography=`` removes
+  bibliography sections — a heading line whose text (after stripping
+  surrounding whitespace and leading ``#``) equals, case-insensitively for
+  Latin letters, one of the six words 参考文献 / 引用文献 / References /
+  Bibliography / Works Cited / Literature Cited — from that line to the end
+  of the document. When both are requested the bibliography is removed
+  first, then the quotes (order fixed at the red stage). With a flag
+  absent nothing changes through that flag (byte-identical outputs).
 - Packaging/docs: ``dependencies = []`` (the ``sieve-core-engine``
   declaration is removed), version 1.6.0, README (en/ja) headers and the
   attribute table covering every ``EvaluationResult`` field, CHANGELOG
@@ -83,6 +98,10 @@ XB = "沿岸域の漁獲量について、十年間の記録を分析した論�
 
 SQ_A = "朝の観察は「共通記録」に基づく。鳥が来た。"
 SQ_B = "夕方の観察は「共通記録」に基づく。魚が来た。"
+
+ASSIGN = "提出課題では身近な自然を一つ選び、二週間の観察記録を書くこと。観察は毎日同じ時刻に行うこと。"
+OWN_A = "畑の土に種をまき、毎朝芽の伸びを記録した。"
+OWN_B = "教室の窓辺でコップ栽培を始めて記録をつけた。"
 
 BIB_HEADINGS = ("参考文献", "引用文献", "References", "Bibliography", "Works Cited", "Literature Cited")
 
@@ -277,18 +296,101 @@ class TestRfT05SpansCli(unittest.TestCase):
             self.assertEqual(_sha256_text(_json_stdout(proc2)),
                              PIN_SPANS_NOSPAN_SHA256)
 
-    def test_rf_t05b_spans_and_exclude_citations_refused(self):
-        """RF-T05b (defined during feat): --spans combined with
-        --exclude-citations is refused with status 2 (span positions are
-        defined against the judged text; stripping would shift them)."""
+    def test_rf_t05b_spans_refused_with_text_changing_flags(self):
+        """RF-T05b (revised in the design-review round): --spans combined
+        with any flag that changes the judged text (--exclude-quotes,
+        --exclude-bibliography, --base) is refused with status 2 (span
+        positions are defined against the judged text; stripping would
+        shift them). The old combined flag name --exclude-citations no
+        longer exists (argparse rejects it)."""
         with tempfile.TemporaryDirectory() as td:
             _write(td, "a.txt", SA)
             _write(td, "b.txt", SB)
+            base = Path(td, "base")
+            base.mkdir()
+            _write(base, "t.txt", TEMPLATE)
             out_dir = Path(td, "out")
             out_dir.mkdir(exist_ok=True)
-            proc = _run_cli(td, str(out_dir), "--spans", "--exclude-citations")
+            for extra in ("--exclude-quotes", "--exclude-bibliography"):
+                proc = _run_cli(td, str(out_dir), "--spans", extra)
+                self.assertEqual(proc.returncode, 2, extra)
+                self.assertTrue(proc.stderr.startswith("Error:"), extra)
+            proc = _run_cli(td, str(out_dir), "--spans", "--base", str(base))
             self.assertEqual(proc.returncode, 2)
             self.assertTrue(proc.stderr.startswith("Error:"))
+            old = _run_cli(td, str(out_dir), "--exclude-citations")
+            self.assertEqual(old.returncode, 2)
+            self.assertIn("unrecognized arguments", old.stderr)
+
+
+class TestRfT06BaseSegmentsRemoved(unittest.TestCase):
+    def test_rf_t06b_base_spans_removed_before_evaluation(self):
+        """RF-T06b (M2 request §3.3 obligation 2): spans of each submission
+        that match a base document are removed BEFORE the evaluation — two
+        submissions sharing only the assignment text become GREEN with the
+        base and RED without it, and the base never enters the results."""
+        from sieve_referee.evaluator import batch_evaluate
+
+        documents = {"da.txt": ASSIGN + OWN_A, "db.txt": ASSIGN + OWN_B}
+        without = _snapshot(batch_evaluate(documents))
+        self.assertEqual([r.mask for r in batch_evaluate(documents)], ["1010"])
+
+        results = batch_evaluate(documents,
+                                 base_documents={"assignment.txt": ASSIGN})
+        self.assertEqual([r.mask for r in results], ["1000"])
+        for r in results:
+            self.assertNotIn("assignment.txt", (r.item_id, r.matched_peer_id))
+        self.assertNotEqual(_snapshot(results), without)
+
+    def test_rf_t06c_short_shared_spans_are_kept(self):
+        """RF-T06c: spans shorter than 10 characters are NOT removed — a
+        base sharing only short template phrases leaves the judgment and
+        the removal report untouched (results equal the no-base run)."""
+        from sieve_referee.base_strip import strip_base_segments
+        from sieve_referee.evaluator import batch_evaluate
+
+        documents = {"a.txt": BA, "b.txt": BB}
+        expected = _snapshot(batch_evaluate(documents))
+        results = batch_evaluate(documents, base_documents={"t.txt": TEMPLATE})
+        self.assertEqual(_snapshot(results), expected)
+        self.assertEqual(results[0].mask, "1010")
+        stripped, removed = strip_base_segments(BA, [TEMPLATE])
+        self.assertEqual(stripped, BA)
+        self.assertEqual(removed, [])
+
+    def test_rf_t06d_removal_report_maps_to_original_and_is_stable(self):
+        """RF-T06d: strip_base_segments reports each removed span against
+        the text AS PASSED IN (start/end/length/text; the slice equals the
+        base material), the stripped text keeps the remaining own content,
+        and re-stripping the stripped text changes nothing (stable on
+        normal inputs)."""
+        from sieve_referee.base_strip import MIN_BASE_SPAN, strip_base_segments
+
+        text = ASSIGN + OWN_A
+        stripped, removed = strip_base_segments(text, [ASSIGN])
+        self.assertEqual(stripped, OWN_A)
+        self.assertEqual(len(removed), 1)
+        span = removed[0]
+        self.assertEqual(set(span), {"start", "end", "length", "text"})
+        self.assertEqual(span["length"], span["end"] - span["start"])
+        self.assertEqual(text[span["start"]:span["end"]], ASSIGN)
+        self.assertEqual(span["text"], ASSIGN)
+        again, removed2 = strip_base_segments(stripped, [ASSIGN])
+        self.assertEqual(again, stripped)
+        self.assertEqual(removed2, [])
+        self.assertEqual(MIN_BASE_SPAN, 10)
+
+    def test_rf_t06e_fully_quoted_submission_becomes_empty(self):
+        """RF-T06e: a submission that consists ONLY of base material becomes
+        empty after the removal and flows through the existing GREEN
+        vocabulary (measured: mask 0000 FULLY_UNIQUE, deterministic, no
+        exception)."""
+        from sieve_referee.evaluator import batch_evaluate
+
+        results = batch_evaluate(
+            {"full.txt": ASSIGN, "other.txt": OWN_B},
+            base_documents={"assignment.txt": ASSIGN})
+        self.assertEqual([r.mask for r in results], ["0000"])
 
 
 class TestRfT06BaseDocumentsLibrary(unittest.TestCase):
@@ -386,6 +488,27 @@ class TestRfT07BaseCli(unittest.TestCase):
             self.assertEqual(proc.returncode, 2)
             self.assertTrue(proc.stderr.startswith("Error:"))
 
+    def test_rf_t07f_base_removal_green_in_cli(self):
+        """RF-T07f (CLI, obligation 2): --base removes the shared assignment
+        text from each submission before the comparison — the pair becomes
+        GREEN and the base document never appears in the JSON results."""
+        with tempfile.TemporaryDirectory() as td:
+            _write(td, "da.txt", ASSIGN + OWN_A)
+            _write(td, "db.txt", ASSIGN + OWN_B)
+            base = Path(td, "base")
+            base.mkdir()
+            _write(base, "assignment.txt", ASSIGN)
+            out_dir = Path(td, "out")
+            out_dir.mkdir()
+            proc = _run_cli(td, str(out_dir), "--base", str(base))
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(proc.stderr, "")
+            payload = json.loads(_json_stdout(proc))
+            results = payload if isinstance(payload, list) else payload["results"]
+            self.assertEqual([r["mask"] for r in results], ["1000"])
+            ids = {r["item_id"] for r in results} | {r["matched_peer_id"] for r in results}
+            self.assertEqual(ids, {"da.txt", "db.txt"})
+
 
 class TestRfT08CitationsDefaultOff(unittest.TestCase):
     def test_rf_t08_without_flag_quotes_still_count(self):
@@ -419,23 +542,23 @@ class TestRfT09ExcludeCitations(unittest.TestCase):
         return payload if isinstance(payload, list) else payload["results"]
 
     def test_rf_t09a_quote_pair_removed_when_enabled(self):
-        """RF-T09a: with --exclude-citations the 10+ char quotation is
-        removed and the pair becomes GREEN (1000)."""
+        """RF-T09a: with --exclude-quotes the 10+ char quotation is removed
+        and the pair becomes GREEN (1000)."""
         with tempfile.TemporaryDirectory() as td:
             results = self._pair_payload(td, "qa.txt", QA, "qb.txt", QB,
-                                         "--exclude-citations")
+                                         "--exclude-quotes")
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0]["mask"], "1000")
             self.assertEqual(results[0]["signal"], "GREEN")
 
     def test_rf_t09b_bibliography_section_removed_when_enabled(self):
-        """RF-T09b: a 参考文献 heading excludes the rest of the document;
-        the pair becomes GREEN (1000)."""
+        """RF-T09b: with --exclude-bibliography a 参考文献 heading excludes
+        the rest of the document; the pair becomes GREEN (1000)."""
         with tempfile.TemporaryDirectory() as td:
             results = self._pair_payload(
                 td, "ba.txt", f"{XA}\n参考文献\n{BIB_BODY}\n",
                 "bb.txt", f"{XB}\n参考文献\n{BIB_BODY}\n",
-                "--exclude-citations")
+                "--exclude-bibliography")
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0]["mask"], "1000")
             self.assertEqual(results[0]["signal"], "GREEN")
@@ -446,7 +569,7 @@ class TestRfT09ExcludeCitations(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             off = self._pair_payload(td, "sa.txt", SQ_A, "sb.txt", SQ_B)
             on = self._pair_payload(td, "sa.txt", SQ_A, "sb.txt", SQ_B,
-                                    "--exclude-citations")
+                                    "--exclude-quotes")
             self.assertEqual(off, on)
             self.assertEqual(on[0]["mask"], "1110")
 
@@ -458,7 +581,7 @@ class TestRfT09ExcludeCitations(unittest.TestCase):
                 results = self._pair_payload(
                     td, f"h{idx}a.txt", f"{XA}\n{heading}\n{BIB_BODY}\n",
                     f"h{idx}b.txt", f"{XB}\n{heading}\n{BIB_BODY}\n",
-                    "--exclude-citations")
+                    "--exclude-bibliography")
                 self.assertEqual(len(results), 1, heading)
                 self.assertEqual(results[0]["mask"], "1000", heading)
 
@@ -469,9 +592,35 @@ class TestRfT09ExcludeCitations(unittest.TestCase):
             results = self._pair_payload(
                 td, "la.txt", f"{XA}\nreferences\n{BIB_BODY}\n",
                 "lb.txt", f"{XB}\nreferences\n{BIB_BODY}\n",
-                "--exclude-citations")
+                "--exclude-bibliography")
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0]["mask"], "1000")
+
+    def test_rf_t09f_quotes_flag_keeps_bibliography(self):
+        """RF-T09f (independence): --exclude-quotes alone does NOT remove a
+        bibliography section — the shared bibliography still drives exactly
+        the same judgment as the flag-less run."""
+        with tempfile.TemporaryDirectory() as td:
+            off = self._pair_payload(
+                td, "ba.txt", f"{XA}\n参考文献\n{BIB_BODY}\n",
+                "bb.txt", f"{XB}\n参考文献\n{BIB_BODY}\n")
+            on = self._pair_payload(
+                td, "ba.txt", f"{XA}\n参考文献\n{BIB_BODY}\n",
+                "bb.txt", f"{XB}\n参考文献\n{BIB_BODY}\n",
+                "--exclude-quotes")
+            self.assertEqual(on, off)
+            self.assertEqual(on[0]["mask"], "1010")
+
+    def test_rf_t09g_bibliography_flag_keeps_quotes(self):
+        """RF-T09g (independence): --exclude-bibliography alone does NOT
+        remove a long quotation — the shared quotation still drives exactly
+        the same judgment as the flag-less run."""
+        with tempfile.TemporaryDirectory() as td:
+            off = self._pair_payload(td, "qa.txt", QA, "qb.txt", QB)
+            on = self._pair_payload(td, "qa.txt", QA, "qb.txt", QB,
+                                    "--exclude-bibliography")
+            self.assertEqual(on, off)
+            self.assertEqual(on[0]["mask"], "1010")
 
 
 class TestRfT10DependenciesAndDocs(unittest.TestCase):
