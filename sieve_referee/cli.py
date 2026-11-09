@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import List
 
 from .chain_detector import detect_indirect_chains
-from .citations import strip_citations
 from .dashboard_builder import generate_dashboard_html, generate_standalone_dashboard_html
 from .diff_builder import generate_diff_html
 from .evaluator import batch_evaluate, build_clusters
@@ -106,15 +105,21 @@ def main():
                         help="監査 RED(裏づけのない全称文)が 1 件でもあれば終了コード 1")
     parser.add_argument("--spans", action="store_true",
                         help="説明層: --json / --json-file の payload に一致文の"
-                             "原文位置を示す spans キーを追加する（--exclude-citations とは併用不可）"
-                             "。指定しない限り出力は 1 バイトも変わらない")
+                             "原文位置を示す spans キーを追加する（本文を変える"
+                             "フラグ --exclude-quotes / --exclude-bibliography /"
+                             " --base とは併用不可）。指定しない限り出力は 1 バイトも変わらない")
     parser.add_argument("--base", type=str, default=None,
-                        help="基準文書ディレクトリ(.txt)。ここにある文書は評価宇宙から"
-                             "完全に除外される（結果・クラスタに現れない）。ディレクトリが"
-                             "不在・空・読めないファイルを含む・対象文書と同じ名前を含む場合は終了コード 2")
-    parser.add_argument("--exclude-citations", action="store_true",
-                        help="引用（内側 10 文字以上の「…」対）と参考文献節（6 種見出し語彙）"
-                             "を比較対象から除外する。既定は無効（指定しない限り出力は 1 バイトも変わらない）")
+                        help="基準文書ディレクトリ(.txt)。依頼書 §3.3 の 2 義務: ①ここにある"
+                             "文書は評価宇宙から完全に除外される（結果・クラスタに現れない）＋"
+                             " ②各提出物の中にある基準文書と一致する区間（10 文字以上の"
+                             "完全一致）を評価の前に取り除く。ディレクトリが不在・空・"
+                             "読めないファイルを含む・対象文書と同じ名前を含む場合は終了コード 2")
+    parser.add_argument("--exclude-quotes", action="store_true",
+                        help="比較前に引用（内側 10 文字以上の「…」対）を除去する。"
+                             "既定は無効（指定しない限り出力は 1 バイトも変わらない）")
+    parser.add_argument("--exclude-bibliography", action="store_true",
+                        help="比較前に参考文献節（6 種見出し語彙・その行から文書末尾まで）"
+                             "を除去する。既定は無効（指定しない限り出力は 1 バイトも変わらない）")
     args = parser.parse_args()
 
     audit_enabled = (args.audit or args.audit_vocab or args.audit_tags
@@ -156,21 +161,20 @@ def main():
             print("Error: Base document name(s) collide with target documents: %s" % ", ".join(collision), file=sys.stderr)
             sys.exit(2)
 
-    if args.spans and args.exclude_citations:
-        print("Error: --spans cannot be combined with --exclude-citations.", file=sys.stderr)
+    if args.spans and (args.exclude_quotes or args.exclude_bibliography or args.base):
+        print("Error: --spans cannot be combined with --exclude-quotes, "
+              "--exclude-bibliography or --base.", file=sys.stderr)
         sys.exit(2)
 
     results: List[EvaluationResult] = []
     if len(doc_dict) >= 2:
-        engine_docs = doc_dict
-        if args.exclude_citations:
-            # 判定と diff/dashboard/説明の入力を一致させるため、CLI 側でも
-            # 同一の strip_citations を先に適用する（batch_evaluate 側の
-            # 適用は冪等なので二重回っても結果は同じ）。
-            engine_docs = {doc_id: strip_citations(content) for doc_id, content in doc_dict.items()}
+        # 判定は batch_evaluate 内の前処理（引用/参考文献/base 除去 → NFKC）で
+        # 行われる。diff/dashboard は閲覧の透明性のため RAW 原文（doc_dict）のまま。
         results = batch_evaluate(
-            engine_docs, max_workers=args.jobs,
-            base_documents=base_dict, exclude_citations=args.exclude_citations)
+            doc_dict, max_workers=args.jobs,
+            base_documents=base_dict,
+            exclude_quotes=args.exclude_quotes,
+            exclude_bibliography=args.exclude_bibliography)
     elif audit_enabled and len(doc_dict) >= 1:
         pass  # 監査単独運用: 1 文書でも監査レーンは実行できる(ペア評価はスキップ)
     else:

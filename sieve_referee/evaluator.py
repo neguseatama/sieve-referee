@@ -4,8 +4,9 @@ from concurrent.futures import ProcessPoolExecutor
 from itertools import combinations
 from typing import Dict, List, Optional, Set, Tuple
 
+from .base_strip import strip_base_segments
 from .blocker import DeterministicBlocker
-from .citations import strip_citations
+from .citations import strip_bibliography, strip_quotes
 from .models import EvaluationResult
 from .referee import LUT_RULES, evaluate_pair
 
@@ -79,25 +80,42 @@ def batch_evaluate(
     documents: Dict[str, str],
     max_workers: int = None,
     base_documents: Optional[Dict[str, str]] = None,
-    exclude_citations: bool = False,
+    exclude_quotes: bool = False,
+    exclude_bibliography: bool = False,
 ) -> List[EvaluationResult]:
     """
     文書辞書(filename -> content)を受け取り、
-    （--exclude-citations 時は引用・参考文献の除去）→ NFKC正規化 →
+    （--exclude-bibliography 時は参考文献節の除去 → --exclude-quotes 時は
+    長い引用対の除去 → base_documents 時は base 一致区間の除去）→ NFKC正規化 →
     決定論的プレ・ブロッキング -> (並列/逐次)ペア評価 ->
     クラスタ構築 -> H4安全昇格、という一連のパイプラインを実行する。
 
-    base_documents（基準文書・CLI の --base）は評価宇宙から完全に除外する:
-    正規化と語彙の検証対象にはなるが、item にも peer にも候補ペアにも
-    クラスタにも現れず、results は documents だけを渡した場合と完全一致
-    する（基準文書由来の H4 昇格污染を構造的に防ぐ）。"""
-    if exclude_citations:
-        documents = {doc_id: strip_citations(content) for doc_id, content in documents.items()}
-        if base_documents:
-            base_documents = {doc_id: strip_citations(content) for doc_id, content in base_documents.items()}
-    # 基準文書は評価宇宙から除外する（results・候補ペア・クラスタに現れない）。
+    引用と参考文献の除外は依頼書 §3.4 どおり独立した 2 引数
+    （exclude_quotes / exclude_bibliography・既定オフ・結合エイリアス無し）。
+    両方指定時の適用順は red 段で固定した順（参考文献 → 引用）。
+
+    base_documents（基準文書・CLI の --base）は依頼書 §3.3 の 2 義務を両方果たす:
+    ①評価宇宙から完全に除外する（正規化と語彙の検証対象にはなるが、item にも
+    peer にも候補ペアにもクラスタにも現れない — 基準文書由来の H4 昇格汚染を
+    構造的に防ぐ）＋ ②各提出物の中にある base と一致する区間（NFKC 空間で
+    10 文字以上の完全一致スパン・左→右 greedy 最長・単一パス）を評価の前に
+    取り除く（sieve_referee.base_strip）。②により・課題文を引用しているだけの
+    提出物どうしが似ていると判定されなくなる。除去で空になった文書は
+    既存の語彙（GREEN・決定論）で扱われる。"""
+    if exclude_bibliography:
+        documents = {doc_id: strip_bibliography(content) for doc_id, content in documents.items()}
+    if exclude_quotes:
+        documents = {doc_id: strip_quotes(content) for doc_id, content in documents.items()}
     if base_documents:
-        unicodedata.normalize("NFKC", "".join(base_documents.values()))
+        # §3.3 義務 ②: 各提出物から base 一致区間を評価の前に除去する。
+        # base 文書自身は照合の参照として与えられたまま（除去しない）。
+        base_texts = list(base_documents.values())
+        documents = {
+            doc_id: strip_base_segments(content, base_texts)[0]
+            for doc_id, content in documents.items()
+        }
+        # 基準文書は評価宇宙から除外する（results・候補ペア・クラスタに現れない）。
+        unicodedata.normalize("NFKC", "".join(base_texts))
 
     normalized_docs = {doc_id: unicodedata.normalize("NFKC", content) for doc_id, content in documents.items()}
     doc_ids = sorted(normalized_docs.keys())
