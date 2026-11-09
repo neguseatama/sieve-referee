@@ -1,0 +1,507 @@
+"""
+Red tests for the sieve-referee v1.6.0 lane (M2, RF-T01..RF-T10).
+
+Design parameters fixed at red stage (2026-11-09, recorded in the worklog):
+
+- Explanation layer = a SEPARATE module ``sieve_referee.explain``;
+  ``EvaluationResult`` keeps exactly its 10 dataclass fields; judgments are
+  identical with or without the layer ("add the explanation without changing
+  the judgment").
+- ``nfkc_starts(original) -> (norm_text, starts)``: pure and deterministic;
+  ``norm_text == unicodedata.normalize("NFKC", original)``; ``starts`` has
+  ``len(norm_text) + 1`` entries, ``starts[0] == 0``,
+  ``starts[-1] == len(original)``, non-decreasing. A norm RANGE ``[s, e)``
+  maps back to the original range ``[starts[s], starts[e])``. Both NFKC
+  shapes are pinned: decomposition (ka + U+3099 -> GA, 2 -> 1) and expansion
+  (U+FB01 ligature -> "fi", 1 -> 2).
+- CLI ``--spans``: the JSON payload gains a ``"spans"`` key
+  (``{pair_key: [span, ...]}``); each span is
+  ``{"a_start", "a_end", "b_start", "b_end"}`` with positions into the RAW
+  file text (composed through the NFKC map). Without ``--spans`` the CLI
+  output stays byte-identical to the pre-1.6.0 pins below.
+- ``base_documents`` (``batch_evaluate`` kwarg) / ``--base DIR`` (CLI): base
+  documents are excluded from the evaluation universe entirely — they never
+  appear as ``item_id``/``matched_peer_id``, never form candidate pairs and
+  never enter clusters, so they cannot pollute H4 cluster promotion.
+  Results are exactly those of evaluating ``documents`` alone. CLI is
+  fail-closed: missing / empty / partially unreadable base directory or a
+  base/target identifier collision exits with status 2.
+- ``--exclude-citations`` (CLI) / ``exclude_citations`` (``batch_evaluate``
+  kwarg), default OFF: removes (1) bibliography sections — a heading line
+  whose text (after stripping surrounding whitespace and leading ``#``)
+  equals, case-insensitively for Latin letters, one of the six words
+  参考文献 / 引用文献 / References / Bibliography / Works Cited /
+  Literature Cited — from that line to the end of the document, then (2)
+  quotation pairs 「...」 whose inner text is at least 10 characters long.
+  With the flag absent nothing changes (byte-identical outputs).
+- Packaging/docs: ``dependencies = []`` (the ``sieve-core-engine``
+  declaration is removed), version 1.6.0, README (en/ja) headers and the
+  attribute table covering every ``EvaluationResult`` field, CHANGELOG
+  entry, and the PEP 639 license form kept untouched.
+
+New names are imported inside the test functions so the red run fails
+per-test with ImportError/TypeError instead of breaking collection.
+"""
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Pins measured against the released 1.5.2 behavior (main f8d8d3d) on
+# 2026-11-09. --json stdout, dashboard line stripped, encoded utf-8.
+PIN_SPANS_NOSPAN_SHA256 = "3225585909698e790e3d7cad0e49c25e0b4286803cd5215b85c78e89fb8001a8"
+PIN_QUOTE_NOFLAG_SHA256 = "96ba14a2d35bef74e96eb5c4853086c5432aa77ea1f2d7fdf89b4a6cb454feed"
+
+SENTENCE = "萠芽が土を押し上げてきた"
+SA = "ﬁrst note\n萠芽が土を押し上げてきた。二本目の葉が開いた。"
+SB = "second note\n萠芽が土を押し上げてきた。根が伸びた。"
+SC = "屋上で菜園を始めて三年目になる。夏にはトマトがよく実る。"
+
+C1 = "共通の文章の例です。二文目は独自の内容を含んでいます。"
+C2 = "共通の文章の例です。ここだけは全く違う話を書いています。"
+C3 = "屋上で菜園を始めて三年目になる。夏にはトマトがよく実る。"
+
+TEMPLATE = "氏名：次のように記入すること。学籍番号：次のように記入すること。所見：次のように記入すること。"
+BA = "氏名：山田花子と記入した。学籍番号：二〇二六と記入した。所見：糸を紡いで布を織る工程を学んだと記入した。"
+BB = "氏名：鈴木一郎と記入した。学籍番号：二〇二七と記入した。所見：窯で粘土を焼き上げる工程を学んだと記入した。"
+
+QUOTE = "これは引用された共通の観察記録である。"
+QA = f"白い猫が屋根の上で日向ぼっこをしてゆったりと過ごしていた。「{QUOTE}」夜になると別の通りへ散歩に出かけた。"
+QB = f"赤い風船が広場の上空をゆっくりと漂いながら人々を楽しませていた。「{QUOTE}」朝になると別の公園へ移動していった。"
+
+BIB_BODY = "Tanaka 2019 Urban Greenspace Journal.\nSuzuki 2021 City Ecology Reports."
+XA = "本研究は都市部の植生変化を十年間追跡した。手法と結果を報告する。"
+XB = "沿岸域の漁獲量について、十年間の記録を分析した論文である。"
+
+SQ_A = "朝の観察は「共通記録」に基づく。鳥が来た。"
+SQ_B = "夕方の観察は「共通記録」に基づく。魚が来た。"
+
+BIB_HEADINGS = ("参考文献", "引用文献", "References", "Bibliography", "Works Cited", "Literature Cited")
+
+
+def _run_cli(target_dir: str, out_dir: str, *extra_args: str):
+    env = os.environ.copy()
+    env["PYTHONHASHSEED"] = "0"
+    return subprocess.run(
+        [sys.executable, "-m", "sieve_referee.cli", target_dir,
+         "--json", "--output-dir", out_dir, *extra_args],
+        cwd=str(REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+def _json_stdout(proc) -> str:
+    return "\n".join(
+        line for line in proc.stdout.splitlines()
+        if not line.startswith(("Standard HTML report generated:",
+                                "Standalone HTML report generated:"))
+    )
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _snapshot(results):
+    return [
+        (r.item_id, r.matched_peer_id, str(r.evaluation_signal.value
+         if hasattr(r.evaluation_signal, "value") else r.evaluation_signal),
+         r.mask, r.pattern_name, r.reason, r.structural_density,
+         r.max_structure_similarity, r.max_content_similarity, r.coverage)
+        for r in results
+    ]
+
+
+def _write(tmp, name, text, encoding="utf-8"):
+    p = Path(tmp, name)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding=encoding)
+    return p
+
+
+class TestRfT01NfkcMapBasics(unittest.TestCase):
+    def test_rf_t01_nfkc_starts_basic_properties(self):
+        """RF-T01: nfkc_starts is a pure deterministic NFKC mapping —
+        norm_text equals NFKC(original); starts has len(norm)+1 entries with
+        starts[0]==0, starts[-1]==len(original), non-decreasing."""
+        from sieve_referee.explain import nfkc_starts
+        import unicodedata
+
+        for original in ("", "plain ascii text", "日本語の文章です。",
+                         "混在ＡＢＣ123 ﬁ 文", "  leading and trailing  "):
+            norm, starts = nfkc_starts(original)
+            self.assertEqual(norm, unicodedata.normalize("NFKC", original))
+            self.assertEqual(len(starts), len(norm) + 1)
+            self.assertEqual(starts[0], 0)
+            self.assertEqual(starts[-1], len(original))
+            for i in range(len(starts) - 1):
+                self.assertLessEqual(starts[i], starts[i + 1])
+            norm2, starts2 = nfkc_starts(original)
+            self.assertEqual((norm, starts), (norm2, starts2))
+
+
+class TestRfT02Decomposition(unittest.TestCase):
+    def test_rf_t02_decomposed_combining_mark_maps_two_to_one(self):
+        """RF-T02: decomposition (ka + U+3099 -> GA): the single normalized
+        character recovers BOTH original characters through its range."""
+        from sieve_referee.explain import nfkc_starts
+
+        original = "か\u3099た"
+        norm, starts = nfkc_starts(original)
+        self.assertEqual(norm, "がた")
+        self.assertEqual(len(starts), 3)
+        # norm[0:1] == "が" recovers orig "か"+combining mark (2 chars)
+        self.assertEqual(norm[0:1], "が")
+        self.assertEqual(original[starts[0]:starts[1]], "か\u3099")
+        self.assertEqual(original[starts[1]:starts[2]], "た")
+        for i in range(len(starts) - 1):
+            self.assertLessEqual(starts[i], starts[i + 1])
+
+
+class TestRfT03Expansion(unittest.TestCase):
+    def test_rf_t03_ligature_expansion_maps_one_to_two(self):
+        """RF-T03: expansion (U+FB01 -> "fi"): both normalized characters
+        share the same original start; the two-character range recovers the
+        single original ligature."""
+        from sieve_referee.explain import nfkc_starts
+
+        original = "\ufb01x"
+        norm, starts = nfkc_starts(original)
+        self.assertEqual(norm, "fix")
+        self.assertEqual(starts, [0, 0, 1, 3])
+        # norm[0:2] == "fi" recovers the single original ligature
+        self.assertEqual(norm[0:2], "fi")
+        self.assertEqual(original[starts[0]:starts[2]], "\ufb01")
+        self.assertEqual(norm[2:3], "x")
+        self.assertEqual(original[starts[2]:starts[3]], "x")
+
+
+class TestRfT04ExplanationDoesNotTouchJudgments(unittest.TestCase):
+    def test_rf_t04_explanation_layer_keeps_results_and_fields(self):
+        """RF-T04: EvaluationResult keeps exactly its 10 fields;
+        explain_results neither mutates the results nor changes any
+        judgment; a fresh batch_evaluate run gives identical values."""
+        from dataclasses import fields
+
+        from sieve_referee.evaluator import batch_evaluate
+        from sieve_referee.models import EvaluationResult
+
+        self.assertEqual(
+            [f.name for f in fields(EvaluationResult)],
+            ["item_id", "evaluation_signal", "mask", "pattern_name", "reason",
+             "structural_density", "max_structure_similarity",
+             "max_content_similarity", "coverage", "matched_peer_id"],
+        )
+
+        documents = {"c1.txt": C1, "c2.txt": C2, "c3.txt": C3}
+        results = batch_evaluate(documents)
+        before = _snapshot(results)
+
+        from sieve_referee.explain import explain_results
+
+        spans = explain_results(documents, results)
+        self.assertIsInstance(spans, dict)
+        # no mutation of any judgment or score
+        self.assertEqual(_snapshot(results), before)
+        # fresh run gives identical judgments
+        self.assertEqual(_snapshot(batch_evaluate(documents)), before)
+
+        pair = next(r for r in results
+                    if {r.item_id, r.matched_peer_id} == {"c1.txt", "c2.txt"})
+        self.assertEqual(pair.mask, "1010")
+        self.assertEqual(pair.evaluation_signal.value, "RED")
+        self.assertEqual(pair.pattern_name, "PARAPHRASE_DETECTED")
+        self.assertEqual(pair.structural_density, 0.7778)
+        self.assertEqual(pair.max_structure_similarity, 0.1163)
+        self.assertEqual(pair.max_content_similarity, 1.0)
+        self.assertEqual(pair.coverage, 0.5)
+
+
+class TestRfT05SpansCli(unittest.TestCase):
+    def test_rf_t05_spans_flag_reports_raw_file_positions(self):
+        """RF-T05: --spans adds a spans key keyed by pair; span positions
+        slice the RAW file text (NFKC ligature expansion shifts positions);
+        without --spans the JSON output is byte-identical to the pin."""
+        from sieve_referee.explain import nfkc_starts  # noqa: F401 (presence)
+
+        with tempfile.TemporaryDirectory() as td:
+            _write(td, "a.txt", SA)
+            _write(td, "b.txt", SB)
+            _write(td, "c.txt", SC)
+            out_dir = Path(td, "out")
+            out_dir.mkdir()
+
+            proc = _run_cli(td, str(out_dir), "--spans")
+            self.assertEqual(proc.returncode, 0)
+            payload = json.loads(_json_stdout(proc))
+            self.assertIn("results", payload)
+            self.assertIn("spans", payload)
+            result_pairs = {
+                f"{r['item_id']}_vs_{r['matched_peer_id']}"
+                for r in payload["results"]
+            }
+            self.assertEqual(set(payload["spans"].keys()), result_pairs)
+
+            raw_a = Path(td, "a.txt").read_text(encoding="utf-8")
+            raw_b = Path(td, "b.txt").read_text(encoding="utf-8")
+            spans_ab = payload["spans"]["a.txt_vs_b.txt"]
+            self.assertTrue(len(spans_ab) >= 1)
+            hit = False
+            for span in spans_ab:
+                self.assertEqual(
+                    set(span.keys()),
+                    {"a_start", "a_end", "b_start", "b_end"})
+                piece_a = raw_a[span["a_start"]:span["a_end"]]
+                piece_b = raw_b[span["b_start"]:span["b_end"]]
+                if piece_a == SENTENCE and piece_b == SENTENCE:
+                    hit = True
+            self.assertTrue(hit, f"no span recovers the copied sentence: {spans_ab}")
+            # GREEN pairs carry empty span lists
+            for key in ("a.txt_vs_c.txt", "b.txt_vs_c.txt"):
+                self.assertEqual(payload["spans"][key], [])
+
+            proc2 = _run_cli(td, str(out_dir))
+            self.assertEqual(proc2.returncode, 0)
+            self.assertNotIn("spans", json.loads(_json_stdout(proc2)))
+            self.assertEqual(_sha256_text(_json_stdout(proc2)),
+                             PIN_SPANS_NOSPAN_SHA256)
+
+
+class TestRfT06BaseDocumentsLibrary(unittest.TestCase):
+    def test_rf_t06_base_documents_excluded_from_universe(self):
+        """RF-T06: base_documents never enter evaluation — results are
+        exactly those of the documents dict alone (no H4 promotion
+        pollution from a shared template)."""
+        from sieve_referee.evaluator import batch_evaluate
+
+        documents = {"a.txt": BA, "b.txt": BB}
+        expected = _snapshot(batch_evaluate(documents))
+        self.assertEqual(
+            [r.mask for r in batch_evaluate(documents)], ["1010"])
+
+        results = batch_evaluate(documents, base_documents={"t.txt": TEMPLATE})
+        self.assertEqual(_snapshot(results), expected)
+        for r in results:
+            self.assertNotIn("t.txt", (r.item_id, r.matched_peer_id))
+        self.assertEqual(results[0].mask, "1010")
+        self.assertEqual(results[0].pattern_name, "PARAPHRASE_DETECTED")
+
+
+class TestRfT07BaseCli(unittest.TestCase):
+    TARGET = {"a.txt": "犬は公園を走る。ボールで遊ぶ。",
+              "b.txt": "船は海を進む。風帆を張る。"}
+
+    def _make_target(self, td):
+        for name, text in self.TARGET.items():
+            _write(td, name, text)
+
+    def test_rf_t07a_base_documents_not_in_results(self):
+        """RF-T07a: --base DIR keeps the template out of the JSON results."""
+        with tempfile.TemporaryDirectory() as td:
+            self._make_target(td)
+            base = Path(td, "base")
+            base.mkdir()
+            _write(base, "t.txt", TEMPLATE)
+            out_dir = Path(td, "out")
+            out_dir.mkdir()
+            proc = _run_cli(td, str(out_dir), "--base", str(base))
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(proc.stderr, "")
+            payload = json.loads(_json_stdout(proc))
+            results = payload if isinstance(payload, list) else payload["results"]
+            ids = {r["item_id"] for r in results} | {r["matched_peer_id"] for r in results}
+            self.assertEqual(ids, {"a.txt", "b.txt"})
+
+    def test_rf_t07b_missing_base_dir_fails_closed(self):
+        """RF-T07b: a nonexistent --base directory exits with status 2."""
+        with tempfile.TemporaryDirectory() as td:
+            self._make_target(td)
+            out_dir = Path(td, "out")
+            out_dir.mkdir()
+            proc = _run_cli(td, str(out_dir), "--base", str(Path(td, "nowhere")))
+            self.assertEqual(proc.returncode, 2)
+            self.assertTrue(proc.stderr.startswith("Error:"))
+
+    def test_rf_t07c_empty_base_dir_fails_closed(self):
+        """RF-T07c: an explicitly given but empty base directory exits 2."""
+        with tempfile.TemporaryDirectory() as td:
+            self._make_target(td)
+            base = Path(td, "base")
+            base.mkdir()
+            out_dir = Path(td, "out")
+            out_dir.mkdir()
+            proc = _run_cli(td, str(out_dir), "--base", str(base))
+            self.assertEqual(proc.returncode, 2)
+            self.assertTrue(proc.stderr.startswith("Error:"))
+
+    def test_rf_t07d_unreadable_base_file_fails_closed(self):
+        """RF-T07d: a base directory with an unreadable/empty member exits 2."""
+        with tempfile.TemporaryDirectory() as td:
+            self._make_target(td)
+            base = Path(td, "base")
+            base.mkdir()
+            _write(base, "t.txt", TEMPLATE)
+            _write(base, "empty.txt", "")
+            out_dir = Path(td, "out")
+            out_dir.mkdir()
+            proc = _run_cli(td, str(out_dir), "--base", str(base))
+            self.assertEqual(proc.returncode, 2)
+            self.assertTrue(proc.stderr.startswith("Error:"))
+
+    def test_rf_t07e_base_target_id_collision_fails_closed(self):
+        """RF-T07e: a base file whose name collides with a target document
+        exits with status 2 (ambiguous input)."""
+        with tempfile.TemporaryDirectory() as td:
+            self._make_target(td)
+            base = Path(td, "base")
+            base.mkdir()
+            _write(base, "a.txt", TEMPLATE)
+            out_dir = Path(td, "out")
+            out_dir.mkdir()
+            proc = _run_cli(td, str(out_dir), "--base", str(base))
+            self.assertEqual(proc.returncode, 2)
+            self.assertTrue(proc.stderr.startswith("Error:"))
+
+
+class TestRfT08CitationsDefaultOff(unittest.TestCase):
+    def test_rf_t08_without_flag_quotes_still_count(self):
+        """RF-T08: default run (no flag) is byte-identical to the 1.5.2 pin
+        and the shared 10+ character quotation still drives a RED."""
+        with tempfile.TemporaryDirectory() as td:
+            _write(td, "qa.txt", QA)
+            _write(td, "qb.txt", QB)
+            out_dir = Path(td, "out")
+            out_dir.mkdir()
+            proc = _run_cli(td, str(out_dir))
+            self.assertEqual(proc.returncode, 0)
+            payload = json.loads(_json_stdout(proc))
+            results = payload if isinstance(payload, list) else payload["results"]
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["mask"], "1010")
+            self.assertEqual(results[0]["signal"], "RED")
+            self.assertEqual(_sha256_text(_json_stdout(proc)),
+                             PIN_QUOTE_NOFLAG_SHA256)
+
+
+class TestRfT09ExcludeCitations(unittest.TestCase):
+    def _pair_payload(self, td, name_a, text_a, name_b, text_b, *extra):
+        _write(td, name_a, text_a)
+        _write(td, name_b, text_b)
+        out_dir = Path(td, "out")
+        out_dir.mkdir()
+        proc = _run_cli(td, str(out_dir), *extra)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(_json_stdout(proc))
+        return payload if isinstance(payload, list) else payload["results"]
+
+    def test_rf_t09a_quote_pair_removed_when_enabled(self):
+        """RF-T09a: with --exclude-citations the 10+ char quotation is
+        removed and the pair becomes GREEN (1000)."""
+        with tempfile.TemporaryDirectory() as td:
+            results = self._pair_payload(td, "qa.txt", QA, "qb.txt", QB,
+                                         "--exclude-citations")
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["mask"], "1000")
+            self.assertEqual(results[0]["signal"], "GREEN")
+
+    def test_rf_t09b_bibliography_section_removed_when_enabled(self):
+        """RF-T09b: a 参考文献 heading excludes the rest of the document;
+        the pair becomes GREEN (1000)."""
+        with tempfile.TemporaryDirectory() as td:
+            results = self._pair_payload(
+                td, "ba.txt", f"{XA}\n参考文献\n{BIB_BODY}\n",
+                "bb.txt", f"{XB}\n参考文献\n{BIB_BODY}\n",
+                "--exclude-citations")
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["mask"], "1000")
+            self.assertEqual(results[0]["signal"], "GREEN")
+
+    def test_rf_t09c_short_quotation_pairs_are_kept(self):
+        """RF-T09c: quotation pairs with inner text shorter than 10
+        characters are kept — the judgment is unchanged with the flag on."""
+        with tempfile.TemporaryDirectory() as td:
+            off = self._pair_payload(td, "sa.txt", SQ_A, "sb.txt", SQ_B)
+            on = self._pair_payload(td, "sa.txt", SQ_A, "sb.txt", SQ_B,
+                                    "--exclude-citations")
+            self.assertEqual(off, on)
+            self.assertEqual(on[0]["mask"], "1110")
+
+    def test_rf_t09d_six_heading_words_excluded(self):
+        """RF-T09d: all six bibliography heading words exclude the trailing
+        section; the pair becomes GREEN (1000) for each."""
+        with tempfile.TemporaryDirectory() as td:
+            for heading in BIB_HEADINGS:
+                name = f"h_{abs(hash(heading)) % 1000}.txt"
+                results = self._pair_payload(
+                    td, name + "a", f"{XA}\n{heading}\n{BIB_BODY}\n",
+                    name + "b", f"{XB}\n{heading}\n{BIB_BODY}\n",
+                    "--exclude-citations")
+                self.assertEqual(len(results), 1, heading)
+                self.assertEqual(results[0]["mask"], "1000", heading)
+
+    def test_rf_t09e_latin_headings_case_insensitive(self):
+        """RF-T09e: Latin headings match case-insensitively (lowercase
+        'references' is still a bibliography heading)."""
+        with tempfile.TemporaryDirectory() as td:
+            results = self._pair_payload(
+                td, "la.txt", f"{XA}\nreferences\n{BIB_BODY}\n",
+                "lb.txt", f"{XB}\nreferences\n{BIB_BODY}\n",
+                "--exclude-citations")
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["mask"], "1000")
+
+
+class TestRfT10DependenciesAndDocs(unittest.TestCase):
+    def test_rf_t10_dependency_removed_and_docs_consistent(self):
+        """RF-T10: pyproject has empty dependencies (sieve-core-engine
+        removed), version 1.6.0 everywhere, README (en/ja) headers and the
+        attribute table covering every dataclass field, CHANGELOG entry,
+        zero sieve_core references in the package, and the PEP 639 license
+        form untouched."""
+        pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertNotIn("sieve-core-engine", pyproject)
+        self.assertIn("dependencies = []", pyproject)
+        self.assertIn('version = "1.6.0"', pyproject)
+        # PEP 639 form kept (do not regress while editing pyproject)
+        self.assertIn('license = "MIT"', pyproject)
+        self.assertIn('license-files = ["LICENSE"]', pyproject)
+        self.assertIn('setuptools>=77.0', pyproject)
+
+        init_py = (REPO_ROOT / "sieve_referee" / "__init__.py").read_text(encoding="utf-8")
+        self.assertIn('__version__ = "1.6.0"', init_py)
+
+        for src in (REPO_ROOT / "sieve_referee").glob("*.py"):
+            self.assertNotIn("sieve_core", src.read_text(encoding="utf-8"),
+                             f"unexpected sieve_core reference in {src.name}")
+
+        readme_en = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        readme_ja = (REPO_ROOT / "README.ja.md").read_text(encoding="utf-8")
+        self.assertIn("# Sieve Referee v1.6.0", readme_en)
+        self.assertIn("# Sieve Referee v1.6.0", readme_ja)
+
+        from dataclasses import fields
+
+        from sieve_referee.models import EvaluationResult
+
+        table_tokens = set(re.findall(r"\|\s*`([a-z_]+)`", readme_en))
+        for f in fields(EvaluationResult):
+            self.assertIn(f.name, table_tokens,
+                          f"README attribute table lacks {f.name}")
+
+        changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn("[1.6.0]", changelog)
+
+
+if __name__ == "__main__":
+    unittest.main()
