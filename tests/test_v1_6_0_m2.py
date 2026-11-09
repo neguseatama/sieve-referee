@@ -179,7 +179,7 @@ class TestRfT03Expansion(unittest.TestCase):
         original = "\ufb01x"
         norm, starts = nfkc_starts(original)
         self.assertEqual(norm, "fix")
-        self.assertEqual(starts, [0, 0, 1, 3])
+        self.assertEqual(starts, [0, 0, 1, 2])
         # norm[0:2] == "fi" recovers the single original ligature
         self.assertEqual(norm[0:2], "fi")
         self.assertEqual(original[starts[0]:starts[2]], "\ufb01")
@@ -276,6 +276,19 @@ class TestRfT05SpansCli(unittest.TestCase):
             self.assertNotIn("spans", json.loads(_json_stdout(proc2)))
             self.assertEqual(_sha256_text(_json_stdout(proc2)),
                              PIN_SPANS_NOSPAN_SHA256)
+
+    def test_rf_t05b_spans_and_exclude_citations_refused(self):
+        """RF-T05b (defined during feat): --spans combined with
+        --exclude-citations is refused with status 2 (span positions are
+        defined against the judged text; stripping would shift them)."""
+        with tempfile.TemporaryDirectory() as td:
+            _write(td, "a.txt", SA)
+            _write(td, "b.txt", SB)
+            out_dir = Path(td, "out")
+            out_dir.mkdir(exist_ok=True)
+            proc = _run_cli(td, str(out_dir), "--spans", "--exclude-citations")
+            self.assertEqual(proc.returncode, 2)
+            self.assertTrue(proc.stderr.startswith("Error:"))
 
 
 class TestRfT06BaseDocumentsLibrary(unittest.TestCase):
@@ -399,7 +412,7 @@ class TestRfT09ExcludeCitations(unittest.TestCase):
         _write(td, name_a, text_a)
         _write(td, name_b, text_b)
         out_dir = Path(td, "out")
-        out_dir.mkdir()
+        out_dir.mkdir(exist_ok=True)
         proc = _run_cli(td, str(out_dir), *extra)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         payload = json.loads(_json_stdout(proc))
@@ -440,12 +453,11 @@ class TestRfT09ExcludeCitations(unittest.TestCase):
     def test_rf_t09d_six_heading_words_excluded(self):
         """RF-T09d: all six bibliography heading words exclude the trailing
         section; the pair becomes GREEN (1000) for each."""
-        with tempfile.TemporaryDirectory() as td:
-            for heading in BIB_HEADINGS:
-                name = f"h_{abs(hash(heading)) % 1000}.txt"
+        for idx, heading in enumerate(BIB_HEADINGS):
+            with tempfile.TemporaryDirectory() as td:
                 results = self._pair_payload(
-                    td, name + "a", f"{XA}\n{heading}\n{BIB_BODY}\n",
-                    name + "b", f"{XB}\n{heading}\n{BIB_BODY}\n",
+                    td, f"h{idx}a.txt", f"{XA}\n{heading}\n{BIB_BODY}\n",
+                    f"h{idx}b.txt", f"{XB}\n{heading}\n{BIB_BODY}\n",
                     "--exclude-citations")
                 self.assertEqual(len(results), 1, heading)
                 self.assertEqual(results[0]["mask"], "1000", heading)

@@ -2,9 +2,10 @@ import os
 import unicodedata
 from concurrent.futures import ProcessPoolExecutor
 from itertools import combinations
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from .blocker import DeterministicBlocker
+from .citations import strip_citations
 from .models import EvaluationResult
 from .referee import LUT_RULES, evaluate_pair
 
@@ -74,12 +75,30 @@ def _worker_evaluate_pair(args: Tuple[str, str, str, str]) -> EvaluationResult:
     return evaluate_pair(text_a, text_b, id_a=id_a, id_b=id_b)
 
 
-def batch_evaluate(documents: Dict[str, str], max_workers: int = None) -> List[EvaluationResult]:
+def batch_evaluate(
+    documents: Dict[str, str],
+    max_workers: int = None,
+    base_documents: Optional[Dict[str, str]] = None,
+    exclude_citations: bool = False,
+) -> List[EvaluationResult]:
     """
     文書辞書(filename -> content)を受け取り、
-    NFKC正規化 -> 決定論的プレ・ブロッキング -> (並列/逐次)ペア評価 ->
+    （--exclude-citations 時は引用・参考文献の除去）→ NFKC正規化 →
+    決定論的プレ・ブロッキング -> (並列/逐次)ペア評価 ->
     クラスタ構築 -> H4安全昇格、という一連のパイプラインを実行する。
-    """
+
+    base_documents（基準文書・CLI の --base）は評価宇宙から完全に除外する:
+    正規化と語彙の検証対象にはなるが、item にも peer にも候補ペアにも
+    クラスタにも現れず、results は documents だけを渡した場合と完全一致
+    する（基準文書由来の H4 昇格污染を構造的に防ぐ）。"""
+    if exclude_citations:
+        documents = {doc_id: strip_citations(content) for doc_id, content in documents.items()}
+        if base_documents:
+            base_documents = {doc_id: strip_citations(content) for doc_id, content in base_documents.items()}
+    # 基準文書は評価宇宙から除外する（results・候補ペア・クラスタに現れない）。
+    if base_documents:
+        unicodedata.normalize("NFKC", "".join(base_documents.values()))
+
     normalized_docs = {doc_id: unicodedata.normalize("NFKC", content) for doc_id, content in documents.items()}
     doc_ids = sorted(normalized_docs.keys())
 

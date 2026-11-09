@@ -5,10 +5,12 @@ from pathlib import Path
 from typing import List
 
 from .chain_detector import detect_indirect_chains
+from .citations import strip_citations
 from .dashboard_builder import generate_dashboard_html, generate_standalone_dashboard_html
 from .diff_builder import generate_diff_html
 from .evaluator import batch_evaluate, build_clusters
-from .io_utils import collect_txt_documents
+from .explain import explain_results
+from .io_utils import collect_txt_documents, read_text_with_nfkc_map
 from .models import EvaluationResult
 from .quantifier_audit import (
     TagFileError,
@@ -44,6 +46,22 @@ def _with_skipped(payload, skipped):
         return {"results": payload, "skipped": skipped}
     enriched = dict(payload)
     enriched["skipped"] = skipped
+    return enriched
+
+
+def _with_spans(payload, spans):
+    """--spans 指定時にのみ "spans" キーを追加する（_with_skipped と同形）。
+
+    リスト payload は {"results": [...], "spans": {...}} に包み、辞書
+    payload（skipped / 監査レーンで包まれた物）には "spans" キーを追加
+    する。spans が None（--spans 無し）のときは 1 バイトも変えない。
+    """
+    if spans is None:
+        return payload
+    if isinstance(payload, list):
+        return {"results": payload, "spans": spans}
+    enriched = dict(payload)
+    enriched["spans"] = spans
     return enriched
 
 
@@ -86,6 +104,17 @@ def main():
                              "指定しない限り receipt は 1 バイトも変わらない")
     parser.add_argument("--fail-on-unverified", action="store_true",
                         help="監査 RED(裏づけのない全称文)が 1 件でもあれば終了コード 1")
+    parser.add_argument("--spans", action="store_true",
+                        help="説明層: --json / --json-file の payload に一致文の"
+                             "原文位置を示す spans キーを追加する（--exclude-citations とは併用不可）"
+                             "。指定しない限り出力は 1 バイトも変わらない")
+    parser.add_argument("--base", type=str, default=None,
+                        help="基準文書ディレクトリ(.txt)。ここにある文書は評価宇宙から"
+                             "完全に除外される（結果・クラスタに現れない）。ディレクトリが"
+                             "不在・空・読めないファイルを含む・対象文書と同じ名前を含む場合は終了コード 2")
+    parser.add_argument("--exclude-citations", action="store_true",
+                        help="引用（内側 10 文字以上の「…」対）と参考文献節（6 種見出し語彙）"
+                             "を比較対象から除外する。既定は無効（指定しない限り出力は 1 バイトも変わらない）")
     args = parser.parse_args()
 
     audit_enabled = (args.audit or args.audit_vocab or args.audit_tags
@@ -106,9 +135,42 @@ def main():
         # stderr に出す: --json の stdout を機械可読のまま保つため
         print("Skipped %d file(s): %s" % (len(skipped), summary), file=sys.stderr)
 
+    base_dict = None
+    if args.base:
+        base_path = Path(args.base)
+        if not base_path.exists() or not base_path.is_dir():
+            print(f"Error: Base directory '{args.base}' does not exist.", file=sys.stderr)
+            sys.exit(2)
+        try:
+            base_dict, base_skipped = collect_txt_documents(base_path)
+        except OSError:
+            base_dict, base_skipped = {}, [{"path": "*", "reason": "unreadable"}]
+        if base_skipped:
+            print("Error: Base directory contains unreadable or empty files.", file=sys.stderr)
+            sys.exit(2)
+        if not base_dict:
+            print(f"Error: No valid .txt files in base directory '{args.base}'.", file=sys.stderr)
+            sys.exit(2)
+        collision = sorted(set(base_dict) & set(doc_dict))
+        if collision:
+            print("Error: Base document name(s) collide with target documents: %s" % ", ".join(collision), file=sys.stderr)
+            sys.exit(2)
+
+    if args.spans and args.exclude_citations:
+        print("Error: --spans cannot be combined with --exclude-citations.", file=sys.stderr)
+        sys.exit(2)
+
     results: List[EvaluationResult] = []
     if len(doc_dict) >= 2:
-        results = batch_evaluate(doc_dict, max_workers=args.jobs)
+        engine_docs = doc_dict
+        if args.exclude_citations:
+            # 判定と diff/dashboard/説明の入力を一致させるため、CLI 側でも
+            # 同一の strip_citations を先に適用する（batch_evaluate 側の
+            # 適用は冪等なので二重回っても結果は同じ）。
+            engine_docs = {doc_id: strip_citations(content) for doc_id, content in doc_dict.items()}
+        results = batch_evaluate(
+            engine_docs, max_workers=args.jobs,
+            base_documents=base_dict, exclude_citations=args.exclude_citations)
     elif audit_enabled and len(doc_dict) >= 1:
         pass  # 監査単独運用: 1 文書でも監査レーンは実行できる(ペア評価はスキップ)
     else:
@@ -129,12 +191,40 @@ def main():
                                        modifier_vocab=modifiers, lang=audit_lang,
                                        risk_index=args.risk_index)
 
+    spans_payload = None
+    if args.spans:
+        # 説明層: 判定に使われた本文（doc_dict）で一致文を再抽出し、位置を
+        # RAW ファイル原文へ対応付ける（NFKC 対応表の合成）。
+        raw_maps = {}
+        for doc_id in doc_dict:
+            mapped = read_text_with_nfkc_map(target_path / doc_id)
+            if mapped is None or mapped[0] != doc_dict[doc_id]:
+                print(f"Error: File '{doc_id}' changed or became unreadable during the run.", file=sys.stderr)
+                sys.exit(2)
+            raw_maps[doc_id] = mapped[1]
+        explain_map = explain_results(doc_dict, results)
+        spans_payload = {}
+        for res in results:
+            key = f"{res.item_id}_vs_{res.matched_peer_id}"
+            starts_a = raw_maps[res.item_id]
+            starts_b = raw_maps[res.matched_peer_id]
+            spans_payload[key] = [
+                {
+                    "a_start": starts_a[span["a_start"]],
+                    "a_end": starts_a[span["a_end"]],
+                    "b_start": starts_b[span["b_start"]],
+                    "b_end": starts_b[span["b_end"]],
+                }
+                for span in explain_map.get(key, [])
+            ]
+
     if args.json:
         if audit_enabled:
             payload = {"results": [result_to_dict(r) for r in results], "audit": audit_report.receipt}
         else:
             payload = [result_to_dict(r) for r in results]
         payload = _with_skipped(payload, skipped)
+        payload = _with_spans(payload, spans_payload)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     if args.json_file:
         out_json_path = Path(args.json_file)
@@ -144,6 +234,7 @@ def main():
         else:
             payload = [result_to_dict(r) for r in results]
         payload = _with_skipped(payload, skipped)
+        payload = _with_spans(payload, spans_payload)
         out_json_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
