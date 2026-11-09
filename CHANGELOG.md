@@ -16,9 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prefix-length fallback), covering both NFKC shapes: decomposition
   (か + combining dakuten → が, 2 → 1) and expansion (U+FB01 ligature → "fi",
   1 → 2). `explain_results(documents, results)` returns, per pair, the
-  sentence-level spans that drove the H3 flag (window-size-1 chunk pairs at
-  or above the H3 threshold — the same rule the engine uses), with positions
-  into the texts as passed in. `EvaluationResult` keeps exactly its ten
+  matched spans found by the M2 request §3.2 winnowing fingerprint
+  (k=8 characters, w=5, minimum match length 16 characters —
+  `sieve_referee.fingerprint`, blake2b digests so the output is
+  independent of PYTHONHASHSEED; each reported span is a verbatim exact
+  match on both sides, extended around its fingerprint seed, and spans are
+  reported regardless of the judgment, so a GREEN pair sharing a
+  >=16-character run is reported as well), with positions into the texts
+  as passed in. This is the same mechanism and span contract Scope 1.5.0
+  uses, so Tray's Cohort can treat both engines in one shape (design
+  chat's third round: the first draft used sentence-level H3 pairs, which
+  did not follow §3.2). `EvaluationResult` keeps exactly its ten
   fields; results are identical with or without the layer. The CLI
   `--spans` flag adds a `spans` key to the `--json` / `--json-file` payload
   (`{"pair_key": [{"a_start", "a_end", "b_start", "b_end"}]}`, positions
@@ -27,6 +35,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   combined with any flag that changes the judged text —
   `--exclude-quotes` / `--exclude-bibliography` / `--base` (exit 2). Without
   the flag every output stays byte-identical (pinned molds).
+- **Fingerprint module (`sieve_referee.fingerprint`)**: the §3.2 winnowing
+  fingerprint as a public, reusable layer — `kgram_hashes` (blake2b,
+  digest 8 bytes, salted `hash()` never used), `winnowing_fingerprints`
+  (leftmost minimum per w-wide window, deterministic), and
+  `fingerprint_match_spans` (shared exact-match spans recovered from the
+  fingerprints: pairs grouped by relative offset, coverage spans merged,
+  extension over the surrounding verbatim match, minimum length
+  `MIN_FINGERPRINT_SPAN = 16`). A complete exact match of >= 16 characters
+  is always recovered in full (winnowing guarantee: matches of length
+  >= w+k-1 = 12 share a fingerprint); shared runs shorter than 16
+  characters never appear (pinned by RF-T11a..c).
 - **Base documents (`--base`, `base_documents=`) — both §3.3 obligations**:
   (1) documents given as base (e.g. the assignment text) are excluded from
   the evaluation universe entirely — they never appear as
@@ -36,9 +55,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `1010` PARAPHRASE_DETECTED into `1011` CLUSTER_PARAPHRASE_GROUP for a
   pair whose own content only shared the template's format); AND (2) spans
   of each submission that match a base document are removed BEFORE the
-  comparison (`sieve_referee.base_strip.strip_base_segments`: exact-
-  substring matches in NFKC space, left-to-right greedy maximal, minimum
-  span 10 characters, single pass — so submissions sharing only the
+  comparison (`sieve_referee.base_strip.strip_base_segments`: matches
+  found through the §3.2 winnowing fingerprint spans in NFKC space and
+  extended to the full verbatim run, minimum span 16 characters — §3.2's
+  fingerprint minimum, raised from the first draft's 10 per the design
+  chat's third round, single pass — so submissions sharing only the
   assignment text no longer look similar to each other). The removal
   report maps every removed span back to the text as passed in
   (`{"start", "end", "length", "text"}` through the NFKC position map); a

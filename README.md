@@ -127,8 +127,8 @@ results = batch_evaluate(
     documents,
     base_documents={"assignment.txt": assignment_text},
     # §3.3, BOTH obligations: the base never enters the universe AND each
-    # submission's base-matching spans (NFKC-exact, >= 10 characters,
-    # left-to-right greedy maximal) are removed before the comparison.
+    # submission's base-matching spans (found through the §3.2 winnowing
+    # fingerprint, >= 16 characters) are removed before the comparison.
     exclude_quotes=True,        # strip 「…」 pairs with 10+ inner characters
     exclude_bibliography=True,  # strip the six bibliography heading sections
 )
@@ -154,9 +154,13 @@ judgment. `nfkc_starts(original)` builds the deterministic NFKC position map
 (`norm_text, starts` — normalized range `[s, e)` recovers
 `original[starts[s]:starts[e]]`, covering both decomposition (か+U+3099 → が)
 and expansion (U+FB01 → fi)); `explain_results(documents, results)` returns,
-for every pair, the sentence-level spans that drove the H3 flag, with
-positions into the texts as passed in. The CLI exposes this through
-`--spans` (positions composed back to the raw file text).
+for every pair, the matched spans found by the M2 request §3.2 winnowing
+fingerprint (`sieve_referee.fingerprint`: k=8 characters, w=5, minimum
+match length 16 characters, blake2b digests — output is independent of
+PYTHONHASHSEED) with positions into the texts as passed in. This is the
+same mechanism and span contract Scope 1.5.0 uses, so Tray's Cohort can
+treat both engines in one shape. The CLI exposes this through `--spans`
+(positions composed back to the raw file text).
 
 ### `EvaluationResult` fields
 
@@ -204,8 +208,8 @@ sieve-referee ./target_documents -j 4
 | `--json-file` | string | Save results as JSON to the given path |
 | `--fail-on-risk` | flag | Exit with status code `1` if any `RED` signal is found |
 | `-j`, `--jobs` | int | Number of worker processes for evaluation (default: CPU count) |
-| `--spans` | flag | Explanation layer: add a `spans` key to the `--json` / `--json-file` payload — per pair, the sentence-level matches behind the H3 flag with positions into the RAW file text (NFKC mapped back). Cannot be combined with any flag that changes the judged text (`--exclude-quotes` / `--exclude-bibliography` / `--base`). Without the flag the output is byte-identical |
-| `--base` | string | Base-documents directory (`.txt`), both §3.3 obligations: (1) those documents are excluded from the evaluation universe entirely — they never appear in results or clusters (a shared assignment template can no longer escalate innocent pairs via cluster promotion), and (2) each submission's base-matching spans (NFKC-exact, at least 10 characters, left-to-right greedy maximal) are removed before the comparison. Fail-closed: a missing, empty or partially unreadable base directory, or a name colliding with a target document, exits with status `2` |
+| `--spans` | flag | Explanation layer: add a `spans` key to the `--json` / `--json-file` payload — per pair, the match spans found by the §3.2 winnowing fingerprint (k=8 chars, w=5, minimum 16 chars; blake2b, PYTHONHASHSEED-independent) with positions into the RAW file text (NFKC mapped back). Cannot be combined with any flag that changes the judged text (`--exclude-quotes` / `--exclude-bibliography` / `--base`). Without the flag the output is byte-identical |
+| `--base` | string | Base-documents directory (`.txt`), both §3.3 obligations: (1) those documents are excluded from the evaluation universe entirely — they never appear in results or clusters (a shared assignment template can no longer escalate innocent pairs via cluster promotion), and (2) each submission's base-matching spans (found through the §3.2 winnowing fingerprint, extended to the verbatim run, at least 16 characters) are removed before the comparison. Fail-closed: a missing, empty or partially unreadable base directory, or a name colliding with a target document, exits with status `2` |
 | `--exclude-quotes` | flag | Remove quotations (「…」 pairs with at least 10 inner characters) before comparison. Default OFF: without the flag the output is byte-identical |
 | `--exclude-bibliography` | flag | Remove bibliography sections (a heading line equal to one of 参考文献 / 引用文献 / References / Bibliography / Works Cited / Literature Cited, case-insensitively, excludes the rest of the document) before comparison. Default OFF: without the flag the output is byte-identical. The two exclusions are independent flags (no combined alias); when both are given the bibliography is removed first, then the quotes |
 
