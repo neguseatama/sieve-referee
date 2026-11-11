@@ -10,7 +10,7 @@ The M2 request (§3.3) defines TWO obligations for base documents
    text do not look similar to each other.
 
 This module implements obligation 2 with the M2 request §3.2 winnowing
-fingerprint (design chat's third round, worklog §108): the match seeds are
+fingerprint (design review round 3): the match seeds are
 the §3.2 fingerprint spans (k=8 characters, w=5 — the constants in
 ``sieve_referee.fingerprint``) between the submission and each base
 document, each seed is extended over the surrounding verbatim exact match,

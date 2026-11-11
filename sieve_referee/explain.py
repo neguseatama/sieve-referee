@@ -13,7 +13,7 @@ This module is deliberately SEPARATE from the judgment pipeline:
   characters — the constants live in ``sieve_referee.fingerprint``), mapped
   back to original-text positions. This is the same mechanism and the same
   span output contract Scope 1.5.0 uses, so Tray's Cohort can treat both
-  engines in one shape (design chat's third round, worklog §108). The
+  engines in one shape (design review round 3). The
   layer reports shared runs REGARDLESS of the judgment (GREEN pairs with a
   >=16-char shared run are reported too); it never mutates an
   ``EvaluationResult`` or changes any judgment — the results of the engine

@@ -1,12 +1,12 @@
 """
 Red tests for the sieve-referee v1.6.0 lane (M2, RF-T01..RF-T10).
 
-Design parameters fixed at red stage (2026-11-09, recorded in the worklog):
+Design parameters fixed at the red stage (2026-11-09):
 
 - Explanation layer = a SEPARATE module ``sieve_referee.explain``;
   ``EvaluationResult`` keeps exactly its 10 dataclass fields; judgments are
   identical with or without the layer ("add the explanation without changing
-  the judgment"). Per the design chat's third round (worklog §108) the
+  the judgment"). Per the design review round 3, the
   explanation layer's METHOD is the M2 request §3.2 winnowing fingerprint
   (k=8 chars / w=5 / minimum match length 16 chars), the same mechanism and
   the same span output contract Scope 1.5.0 uses, so Tray's Cohort can
@@ -38,7 +38,7 @@ Design parameters fixed at red stage (2026-11-09, recorded in the worklog):
   each submission that match a base document are removed BEFORE the
   comparison (``sieve_referee.base_strip``: matches found through the §3.2
   winnowing fingerprint spans in NFKC space — same k=8/w=5 constants,
-  minimum span 16 characters per the design chat's third round — extended
+  minimum span 16 characters per the design review round 3 — extended
   to the full exact-match run around each fingerprint seed, single
   pass; removal positions reported against the text as passed in through
   the NFKC position map). CLI is fail-closed: missing / empty / partially
@@ -85,7 +85,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PIN_SPANS_NOSPAN_SHA256 = "3225585909698e790e3d7cad0e49c25e0b4286803cd5215b85c78e89fb8001a8"
 PIN_QUOTE_NOFLAG_SHA256 = "96ba14a2d35bef74e96eb5c4853086c5432aa77ea1f2d7fdf89b4a6cb454feed"
 
-# Shared sentence grew to 16 chars (design chat's third round: the
+# Shared sentence grew to 16 chars (design review round 3: the
 # explanation layer reports fingerprint spans, minimum length 16, so the
 # pinned shared passage must reach that minimum). The preamble keeps the
 # shared sentence its OWN sentence (RED pair). The exact-match extension
@@ -367,7 +367,7 @@ class TestRfT06BaseSegmentsRemoved(unittest.TestCase):
     def test_rf_t06c_short_shared_spans_are_kept(self):
         """RF-T06c: spans shorter than 16 characters are NOT removed (the
         minimum is §3.2's fingerprint minimum, NOT §3.4's quote minimum —
-        fixed by the design chat's third round) — a base sharing only short
+        fixed by the design review round 3) — a base sharing only short
         template phrases leaves the judgment and the removal report
         untouched (results equal the no-base run)."""
         from sieve_referee.base_strip import strip_base_segments
@@ -689,7 +689,7 @@ class TestRfT10DependenciesAndDocs(unittest.TestCase):
 
 
 class TestRfT11FingerprintSpans(unittest.TestCase):
-    """RF-T11 (design chat's third round, worklog §108): the explanation
+    """RF-T11 (design review round 3): the explanation
     layer is the M2 request §3.2 winnowing fingerprint — k=8 chars,
     w=5, minimum match length 16 chars — with the same span output
     contract Scope 1.5.0 uses. Three pins: original positions,

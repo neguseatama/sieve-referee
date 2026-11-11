@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   >=16-character run is reported as well), with positions into the texts
   as passed in. This is the same mechanism and span contract Scope 1.5.0
   uses, so Tray's Cohort can treat both engines in one shape (design
-  chat's third round: the first draft used sentence-level H3 pairs, which
+  review round 3: the first draft used sentence-level H3 pairs, which
   did not follow §3.2). `EvaluationResult` keeps exactly its ten
   fields; results are identical with or without the layer. The CLI
   `--spans` flag adds a `spans` key to the `--json` / `--json-file` payload
@@ -59,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   found through the §3.2 winnowing fingerprint spans in NFKC space and
   extended to the full verbatim run, minimum span 16 characters — §3.2's
   fingerprint minimum, raised from the first draft's 10 per the design
-  chat's third round, single pass — so submissions sharing only the
+  review round 3, single pass — so submissions sharing only the
   assignment text no longer look similar to each other). The removal
   report maps every removed span back to the text as passed in
   (`{"start", "end", "length", "text"}` through the NFKC position map); a

@@ -7,7 +7,7 @@ planned for sieve-scope 1.5.0 (token-normalized, k=5 tokens / w=4 /
 minimum 10 tokens there), so Tray's Cohort can treat both engines in one
 shape.
 
-Constants (fixed at the red stage, worklog §108):
+Constants (fixed at the red stage):
 
 - ``FINGERPRINT_K = 8``  — k-gram length in characters
 - ``FINGERPRINT_W = 5``  — winnowing window width
